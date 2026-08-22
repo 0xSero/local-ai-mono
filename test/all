@@ -1,0 +1,10 @@
+#!/bin/bash
+# Run every module suite. Each is independent and sandboxed.
+set -uo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+status=0
+for suite in hardware registry models engine; do
+  echo "── $suite"
+  bash "./$suite-test.sh" || status=1
+done
+exit $status

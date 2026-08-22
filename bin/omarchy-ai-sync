@@ -1,0 +1,6 @@
+#!/bin/bash
+# Refresh the catalog from the GitHub accounts the registry lists.
+set -euo pipefail
+source "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/local-ai.sh"
+registry_sync
+local_ai_notify_shell

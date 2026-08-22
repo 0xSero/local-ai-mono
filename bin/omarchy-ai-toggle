@@ -1,0 +1,6 @@
+#!/bin/bash
+set -euo pipefail
+source "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/local-ai.sh"
+model_is_setup || { echo "Local AI is not set up. Run: omarchy ai setup" >&2; exit 2; }
+if engine_running; then engine_stop; else engine_start; fi
+local_ai_notify_shell
