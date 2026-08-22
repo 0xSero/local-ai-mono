@@ -11,7 +11,7 @@ export OMARCHY_AI_VRAM_MB=$'24564\n24564'
 fast=$(model_scale "$(registry_get fast)" 2)
 plan=$(engine_plan "$fast" 12434 | tr '\n' ' ')
 for expected in "--name omarchy-local-ai" "--restart unless-stopped" "--gpus all" \
-                "--publish 127.0.0.1:12434:8000" "--shm-size 32g" "--env TP=2"; do
+                "--publish 127.0.0.1:12434:8000" "--shm-size 32g" "--tensor-parallel-size 2" "--kv-cache-dtype fp8"; do
   [[ $plan == *"$expected"* ]] || fail "plan carries [$expected]" "plan: $plan"
 done
 [[ $plan == *"--volume $HOME/.cache"* ]] || fail "a ~ volume expands to \$HOME" "plan: $plan"

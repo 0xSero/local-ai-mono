@@ -80,6 +80,12 @@ least `min_gpus` cards *each* carry `min_vram_mb`. Two 24 GB cards are not one
 48 GB card, and pretending otherwise produces recipes that pass the gate and
 then fail to load.
 
+**Both tiers are single-card capable, and the MoE is the fast one.** `fast` is
+the larger model by parameter count but activates only ~3B per token, so it
+decodes quicker than the dense `smart`. What differs on one card is context:
+dense attention needs 4.16 GiB of KV at 131k where the MoE needs 1.32 GiB, so
+`smart` starts at 40,960 and reaches the full window at two GPUs.
+
 **`scale` collapses per-GPU-count variants into one recipe.** The map is keyed
 by card count; the largest key the machine reaches is merged over the base
 (objects merge, scalars and arrays replace). One `fast` entry covers TP1, TP2

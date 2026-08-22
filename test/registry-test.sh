@@ -14,7 +14,8 @@ assert_eq "$(registry_get nope)" "" "an unknown name resolves to empty"
 pass "recipes are addressable by name"
 
 first=$(registry_recipes | jq -r '.[0].name')
-assert_eq "$first" "smart" "the largest requirement sorts first"
+assert_eq "$first" "fast" "equal requirements tie-break alphabetically, so fast leads"
+assert_eq "$(registry_recipes | jq -r 'map(.min_vram_mb) | (.[0] >= .[-1])')" "true" "heavier requirements sort ahead of lighter ones"
 pass "recipes come back in serving preference order"
 
 # A cached catalog wins over the shipped one.

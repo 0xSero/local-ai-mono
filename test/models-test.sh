@@ -10,34 +10,35 @@ ONE='[24564]'; TWO='[24564,24564]'; FOUR='[24564,24564,24564,24564]'; SMALL='[16
 fast=$(registry_get fast); smart=$(registry_get smart)
 
 model_fits "$fast" "$ONE" || fail "fast fits a single 24 GB card"
-if model_fits "$smart" "$ONE"; then fail "smart needs two cards"; fi
+model_fits "$smart" "$ONE" || fail "smart also fits a single 24 GB card"
 model_fits "$smart" "$TWO" || fail "smart fits two cards"
 if model_fits "$fast" "$SMALL"; then fail "a 16 GB card fits nothing"; fi
-pass "fit is decided by qualifying card count, not summed VRAM"
+pass "both tiers run on one card; a 16 GB card runs nothing"
 
 assert_eq "$(model_qualifying_gpus "$fast" "$FOUR")" "4" "qualifying cards are counted"
 pass "qualifying cards are counted"
 
-scaled=$(model_scale "$fast" 1)
-assert_eq "$(jq -r '.env.TP // "none"' <<<"$scaled")" "none" "one GPU takes no scale step"
-scaled=$(model_scale "$fast" 4)
-assert_eq "$(jq -r '.env.TP' <<<"$scaled")" "4" "four GPUs take the 4-step"
-assert_eq "$(jq -r '.scale // "gone"' <<<"$scaled")" "gone" "the scale map is consumed"
-scaled=$(model_scale "$fast" 3)
-assert_eq "$(jq -r '.env.TP' <<<"$scaled")" "2" "three GPUs take the largest step that fits"
+tp() { jq -r '(.args | index("--tensor-parallel-size")) as $i | if $i then .args[$i+1] else "1" end' <<<"$1"; }
+assert_eq "$(tp "$(model_scale "$fast" 1)")" "1" "one GPU takes no scale step"
+assert_eq "$(tp "$(model_scale "$fast" 4)")" "4" "four GPUs take the 4-step"
+assert_eq "$(tp "$(model_scale "$fast" 3)")" "2" "three GPUs take the largest step that fits"
+assert_eq "$(jq -r '.scale // "gone"' <<<"$(model_scale "$fast" 4)")" "gone" "the scale map is consumed"
+assert_eq "$(jq -r '.context_window' <<<"$(model_scale "$smart" 2)")" "131072" "a second card buys smart the full window"
 pass "scale merges the largest step the machine reaches"
 
 assert_eq "$(model_autopick "$ONE" | jq -r .name)" "fast" "one card auto-picks fast"
-assert_eq "$(model_autopick "$FOUR" | jq -r .name)" "smart" "four cards auto-pick smart"
+assert_eq "$(model_autopick "$FOUR" | jq -r .name)" "fast" "more cards still default to fast, scaled up"
+assert_eq "$(tp "$(model_autopick "$FOUR")")" "4" "the auto-pick is scaled to the machine"
 if model_autopick "$SMALL" >/dev/null 2>&1; then fail "nothing fits a small card"; fi
-pass "auto-pick takes the best model the machine can run"
+pass "auto-pick defaults to fast and scales it to the hardware"
 
 assert_eq "$(model_resolve fast "$ONE" | jq -r .name)" "fast" "a named model resolves"
-if model_resolve smart "$ONE" 2>/dev/null; then fail "smart is refused on one card"; fi
+assert_eq "$(model_resolve smart "$ONE" | jq -r .name)" "smart" "smart is reachable on one card"
+if model_resolve smart "$SMALL" 2>/dev/null; then fail "a 16 GB card is refused"; fi
 if model_resolve nope "$ONE" 2>/dev/null; then fail "an unknown name is refused"; fi
 pass "named models resolve and refuse honestly"
 
-provider=$(model_provider_json "$(model_scale "$smart" 4)" "http://127.0.0.1:12434/v1")
+provider=$(model_provider_json "$(model_scale "$fast" 4)" "http://127.0.0.1:12434/v1")
 assert_eq "$(jq -r '.api' <<<"$provider")" "openai-completions" "provider speaks the openai api"
 assert_eq "$(jq -c '.models[0].input' <<<"$provider")" '["text","image"]' "a vision model gets image input"
 assert_eq "$(jq -r '.models[0].maxTokens' <<<"$provider")" "$(jq -r '.models[0].contextWindow' <<<"$provider")" "generation is never capped below the context window"

@@ -19,14 +19,25 @@ Two, named for what they are to the person choosing. Quantization, engine,
 tensor parallelism and context window are recipe internals that can change
 without the choice changing.
 
-| Tier | Model | Needs | Engine |
+| Tier | Model | Why | Context on 1× 24 GB |
 |---|---|---|---|
-| `fast` | Qwen3.8-27B (AWQ-INT4 + DSpark, vision) | 1× 24 GB | sglang |
-| `smart` | Qwen3.6-35B (official FP8, vision) | 2× 24 GB | vLLM |
+| `fast` | Qwen3.6-35B-A3B (GPTQ-INT4) | MoE — only ~3B parameters fire per token, so it decodes quickest | 131,072 |
+| `smart` | Qwen3.8-27B (AWQ-INT4) | dense — every parameter works on every token | 40,960 |
 
-Both serve with tool-call and reasoning parsers, so agents get real
-`tool_calls` JSON and clean content, and both accept images — the agent can
-screenshot your desktop and act on what it sees.
+The bigger model is the *faster* one: a mixture-of-experts activates a fraction
+of its weights per token. Measured on 2× 3090, the 35B ran 136 tok/s against
+the dense 27B's ~92.
+
+Both run on a **single 24 GB card** and scale themselves up as you add cards —
+tensor parallelism rises and `smart` gains the full 131k window at two GPUs.
+The context gap on one card is arithmetic, not preference: dense attention needs
+4.16 GiB of KV at 131k where the MoE needs 1.32 GiB.
+
+Both serve on vLLM with FP8 KV cache and identical flag patterns, so the two
+recipes differ only in which weights they load. Both carry tool-call and
+reasoning parsers — agents get real `tool_calls` JSON and clean content — and
+both accept images, so the agent can screenshot your desktop and act on what it
+sees.
 
 A single recipe covers 1, 2 and 4 GPUs: a `scale` map keyed by card count is
 merged over the base, raising tensor parallelism and context as the hardware
