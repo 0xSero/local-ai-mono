@@ -6,13 +6,13 @@
 # override what ships without editing files in place.
 #
 #   $OMARCHY_AI_CATALOG          explicit override (tests, experiments)
-#   ~/.local/state/.../catalog.json   written by registry_sync
-#   <repo>/share/local-ai.json   shipped defaults
+#   ~/.local/state/.../catalog.json   written atomically by registry_sync
+#   <repo>/share/registry.json        shipped defaults
 #
 # Depends on: nothing.
 
 REGISTRY_STATE_DIR="${OMARCHY_AI_STATE_DIR:-$HOME/.local/state/omarchy/local-ai}"
-REGISTRY_SHIPPED="${OMARCHY_AI_SHIPPED:-$LOCAL_AI_ROOT/share/local-ai.json}"
+REGISTRY_SHIPPED="${OMARCHY_AI_SHIPPED:-$LOCAL_AI_ROOT/share/registry.json}"
 
 registry_path() {
   local cached="$REGISTRY_STATE_DIR/catalog.json"
@@ -33,11 +33,10 @@ registry_port() {
   jq -r '.port' "$(registry_path)"
 }
 
-# Recipes in serving preference order: the largest requirement that a machine
-# can satisfy is the best model it can run, so callers take the first that
-# fits. Alphabetical tie-break keeps merges from reshuffling the default.
+# Recipes carry an explicit preference. This keeps topology selection obvious:
+# on four cards qwen36-tp4 wins, on two cards the first fitting entry is TP2.
 registry_recipes() {
-  jq -c '.recipes | sort_by([-.min_vram_mb, -(.min_gpus // 1), .name])' "$(registry_path)"
+  jq -c '.recipes | sort_by([.priority, .name])' "$(registry_path)"
 }
 
 registry_names() {
@@ -49,47 +48,59 @@ registry_get() {
   jq -c --arg name "$1" 'first(.recipes[] | select(.name == $name)) // empty' "$(registry_path)"
 }
 
-registry_sources() {
-  jq -r '.sources[]?' "$REGISTRY_SHIPPED"
-}
-
-# Publishing a recipe is pushing one omarchy-recipe.json to a repo root. Each
-# source is a GitHub account; every public repo of that account carrying the
-# manifest contributes a recipe. Remote wins on a shared name, so a repo can
-# refine what ships without a release here.
+# Sync exactly one versioned registry document. We do not crawl every repo in
+# an account: that made provenance implicit and let partial API failures replace
+# a good cache. The old cache survives every download or validation failure.
 registry_sync() {
-  local api="${OMARCHY_AI_GITHUB_API:-https://api.github.com}"
-  local raw="${OMARCHY_AI_GITHUB_RAW:-https://raw.githubusercontent.com}"
-  local remote="[]" owner listing repos repo branch manifest
-
-  while read -r owner; do
-    [[ -n $owner ]] || continue
-    echo "Scanning github.com/$owner..."
-    listing=$(curl --fail --silent --max-time 30 "$api/users/$owner/repos?per_page=100" 2>/dev/null) || continue
-    # A rate-limited API answers with an object, not an array; skip it rather
-    # than letting jq abort the whole sync.
-    jq -e 'type == "array"' <<<"$listing" >/dev/null 2>&1 || continue
-    repos=$(jq -r '.[] | "\(.name) \(.default_branch)"' <<<"$listing")
-    while read -r repo branch; do
-      [[ -n $repo ]] || continue
-      manifest=$(curl --fail --silent --max-time 10 "$raw/$owner/$repo/$branch/omarchy-recipe.json" 2>/dev/null) || continue
-      if registry_valid_recipe "$manifest"; then
-        remote=$(jq --argjson recipe "$(jq --arg src "github:$owner/$repo" '. + {source: $src}' <<<"$manifest")" \
-          '. + [$recipe]' <<<"$remote")
-        echo "  found: $(jq -r '.name' <<<"$manifest") ($owner/$repo)"
-      fi
-    done <<<"$repos"
-  done < <(registry_sources)
-
+  local url="${OMARCHY_AI_REGISTRY_URL:-}" temporary
+  [[ -n $url ]] || { echo "Set OMARCHY_AI_REGISTRY_URL to the registry JSON URL." >&2; return 1; }
   mkdir -p "$REGISTRY_STATE_DIR"
-  jq --argjson remote "$remote" \
-    '.recipes = ((.recipes + $remote) | group_by(.name) | map(last) | sort_by([-.min_vram_mb, -(.min_gpus // 1), .name]))' \
-    "$REGISTRY_SHIPPED" >"$REGISTRY_STATE_DIR/catalog.json"
-
-  echo "Catalog now carries $(jq '.recipes | length' "$REGISTRY_STATE_DIR/catalog.json") recipes ($(jq 'length' <<<"$remote") from GitHub)."
+  temporary=$(mktemp "$REGISTRY_STATE_DIR/.catalog.json.XXXXXX")
+  if ! curl --fail --silent --show-error --max-time 30 "$url" >"$temporary"; then
+    rm -f "$temporary"
+    return 1
+  fi
+  if ! registry_valid_catalog "$temporary"; then
+    echo "Downloaded registry failed validation; keeping the current catalog." >&2
+    rm -f "$temporary"
+    return 1
+  fi
+  mv "$temporary" "$REGISTRY_STATE_DIR/catalog.json"
+  echo "Catalog now carries $(jq '.recipes | length' "$REGISTRY_STATE_DIR/catalog.json") pinned recipes."
 }
 
-# The minimum a published manifest must carry to be worth merging.
-registry_valid_recipe() {
-  jq -e '.name and .label and .min_vram_mb and .image' <<<"$1" >/dev/null 2>&1
+# Registry validation is intentionally strict because this JSON becomes a
+# Docker command. Images and model revisions are immutable, TP is one of the
+# alpha topologies, names are unique, and graph-disabling flags are rejected.
+registry_valid_catalog() {
+  jq -e '
+    def flag($args; $name):
+      ($args | index($name)) as $index
+      | if $index == null then null else $args[$index + 1] end;
+    .schemaVersion == 1
+    and (.port | type == "number" and . >= 1 and . <= 65535)
+    and (.recipes | type == "array" and length >= 6)
+    and (([.recipes[].name] | unique | length) == (.recipes | length))
+    and (["qwen36-tp1", "qwen36-tp2", "qwen36-tp4", "qwen38-tp1", "qwen38-tp2", "qwen38-tp4"]
+      - [.recipes[].name] | length == 0)
+    and all(.recipes[]; . as $recipe |
+      ($recipe.name | type == "string" and test("^[a-z0-9][a-z0-9-]*$"))
+      and ($recipe.label | type == "string" and length > 0)
+      and ($recipe.priority | type == "number")
+      and ($recipe.min_vram_mb | type == "number" and . >= 23000)
+      and ($recipe.min_gpus == $recipe.tensor_parallel_size)
+      and ([1, 2, 4] | index($recipe.tensor_parallel_size) != null)
+      and ($recipe.image | type == "string" and test("@sha256:[0-9a-f]{64}$"))
+      and ($recipe.model | type == "string" and length > 0)
+      and ($recipe.served_name | type == "string" and length > 0)
+      and ($recipe.revision | type == "string" and test("^[0-9a-f]{40}$"))
+      and ($recipe.args | type == "array" and all(.[]; type == "string"))
+      and (flag($recipe.args; "--model") == $recipe.model)
+      and (flag($recipe.args; "--served-model-name") == $recipe.served_name)
+      and (flag($recipe.args; "--revision") == $recipe.revision)
+      and (flag($recipe.args; "--tensor-parallel-size") == ($recipe.tensor_parallel_size | tostring))
+      and ($recipe | has("scale") | not)
+      and ([$recipe.args[] | select(test("disable.*cuda.*graph|enforce.eager"; "i"))] | length == 0)
+    )
+  ' "$1" >/dev/null 2>&1
 }

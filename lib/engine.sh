@@ -20,12 +20,15 @@ ENGINE_CONTAINER="${OMARCHY_AI_CONTAINER:-omarchy-local-ai}"
 # entrypoints, and guessing flags for them would break them.
 engine_plan() {
   local recipe=$1 port=$2
-  local container_port image
+  local container_port image gpu_selector
   container_port=$(jq -r '.container_port // 8000' <<<"$recipe")
   image=$(jq -r '.image' <<<"$recipe")
+  gpu_selector=$(hw_gpu_selector \
+    "$(jq -r '.tensor_parallel_size' <<<"$recipe")" \
+    "$(jq -r '.min_vram_mb' <<<"$recipe")") || return 1
 
   local -a argv=(run --detach --name "$ENGINE_CONTAINER" --restart unless-stopped
-    --gpus "$(hw_gpu_selector)"
+    --gpus "$gpu_selector"
     --publish "127.0.0.1:$port:$container_port")
 
   local pair
@@ -69,9 +72,10 @@ engine_bootstrap() {
 # ---------------------------------------------------------------- lifecycle
 
 engine_run() {
-  local recipe=$1 port=$2
+  local recipe=$1 port=$2 plan
   local -a argv
-  mapfile -t argv < <(engine_plan "$recipe" "$port")
+  plan=$(engine_plan "$recipe" "$port") || return 1
+  mapfile -t argv <<<"$plan"
   engine_remove_container
   docker "${argv[@]}" >/dev/null
 }
@@ -138,7 +142,10 @@ engine_verify() {
   reply=$(curl --fail --silent --max-time 300 "http://127.0.0.1:$port/v1/chat/completions" \
     --header "Content-Type: application/json" \
     --data "$(jq -n --arg model "$served" \
-      '{model: $model, messages: [{role: "user", content: "Reply with the single word: ready"}]}')")
+      '{model: $model,
+        messages: [{role: "user", content: "Reply with the single word: ready"}],
+        max_completion_tokens: 32,
+        chat_template_kwargs: {enable_thinking: false}}')")
   if ! jq -e '.choices[0].message.content | length > 0' <<<"$reply" >/dev/null; then
     echo "The model server did not answer a chat completion: $reply" >&2
     return 1

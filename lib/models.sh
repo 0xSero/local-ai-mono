@@ -2,7 +2,6 @@
 #
 # This is where hardware meets registry. It answers three questions:
 #   does this recipe fit?          model_fits
-#   what shape should it take?     model_scale
 #   which one should we serve?     model_autopick / model_resolve
 # and then owns the record of what is active and the agent wiring that points
 # at it.
@@ -22,23 +21,6 @@ model_fits() {
     <<<"$recipe" >/dev/null
 }
 
-model_qualifying_gpus() {
-  local recipe=$1 vrams=$2
-  jq --argjson vrams "$vrams" '. as $r | [$vrams[] | select(. >= $r.min_vram_mb)] | length' <<<"$recipe"
-}
-
-# One recipe covers 1, 2 and 4 GPUs: `scale` holds overrides keyed by card
-# count, and the largest key the machine reaches is merged over the base.
-# Objects merge, scalars and arrays replace — so a scale step can swap the
-# whole engine argv or just raise the context window.
-model_scale() {
-  local recipe=$1 count=$2
-  jq -c --argjson n "$count" \
-    '((.scale // {}) | to_entries | map(select((.key | tonumber) <= $n))
-      | sort_by(.key | tonumber) | last | .value // {}) as $step
-     | del(.scale) * $step' <<<"$recipe"
-}
-
 # The best model this machine can run: recipes are already in preference
 # order, so the first that fits wins.
 model_autopick() {
@@ -46,15 +28,14 @@ model_autopick() {
   while read -r recipe; do
     [[ -n $recipe ]] || continue
     if model_fits "$recipe" "$vrams"; then
-      model_scale "$recipe" "$(model_qualifying_gpus "$recipe" "$vrams")"
+      printf '%s\n' "$recipe"
       return 0
     fi
   done < <(registry_recipes | jq -c '.[]')
   return 1
 }
 
-# A named model, scaled to this machine. Fails loudly when the name is unknown
-# or the hardware cannot carry it.
+# A named immutable recipe. Fails loudly when its exact topology cannot fit.
 model_resolve() {
   local name=$1 vrams=$2 recipe
   recipe=$(registry_get "$name")
@@ -67,7 +48,7 @@ model_resolve() {
     echo "\"$name\" needs $(jq -r '.min_gpus // 1' <<<"$recipe")× $(($(jq -r '.min_vram_mb' <<<"$recipe") / 1024)) GB GPUs; this machine has $(jq 'length' <<<"$vrams")× up to $(($(jq 'max // 0' <<<"$vrams") / 1024)) GB." >&2
     return 1
   fi
-  model_scale "$recipe" "$(model_qualifying_gpus "$recipe" "$vrams")"
+  printf '%s\n' "$recipe"
 }
 
 # ---------------------------------------------------------------- active record
@@ -75,13 +56,16 @@ model_resolve() {
 # What is deployed right now. Written after a successful serve so every other
 # surface (status, panel, agent wiring) reads one source of truth.
 model_record() {
-  local recipe=$1 port=$2
+  local recipe=$1 port=$2 temporary
   mkdir -p "$MODELS_STATE_DIR"
+  temporary=$(mktemp "$MODELS_STATE_DIR/.recipe.json.XXXXXX")
   jq -n --argjson r "$recipe" --argjson port "$port" '{
     name: $r.name, label: $r.label, model: ($r.model // ""),
     served_name: ($r.served_name // ""), image: $r.image,
-    port: $port, context_window: ($r.context_window // 8192)
-  }' >"$MODELS_RECORD"
+    port: $port, context_window: ($r.context_window // 8192),
+    tensor_parallel_size: $r.tensor_parallel_size
+  }' >"$temporary"
+  mv "$temporary" "$MODELS_RECORD"
 }
 
 model_active() {
@@ -103,7 +87,7 @@ model_is_setup() {
 }
 
 model_forget() {
-  rm -rf "$MODELS_STATE_DIR"
+  rm -f "$MODELS_RECORD"
 }
 
 # ---------------------------------------------------------------- agent wiring
@@ -133,7 +117,7 @@ model_provider_json() {
         supportsDeveloperRole: false,
         supportsReasoningEffort: false,
         thinkingFormat: ($r.thinking_format // "openai"),
-        maxTokensField: "max_tokens",
+        maxTokensField: "max_completion_tokens",
         supportsStore: false,
         supportsStrictMode: false,
         supportsUsageInStreaming: false
@@ -147,21 +131,44 @@ model_provider_json() {
 # keep our own default current across model switches.
 model_wire_agents() {
   local recipe=$1 port=$2
-  local served endpoint provider agent dir
+  local served endpoint provider agent dir current temporary
   served=$(jq -r '.served_name // ""' <<<"$recipe")
   [[ -n $served ]] || return 0
   endpoint="http://127.0.0.1:$port/v1"
   provider=$(model_provider_json "$recipe" "$endpoint")
 
+  # Validate every user-owned file before changing any of them. A malformed
+  # file therefore fails the whole operation without partially wiring agents.
+  for agent in "${MODELS_AGENTS[@]}"; do
+    dir="$HOME/.$agent/agent"
+    current=$(cat "$dir/models.json" 2>/dev/null || echo '{}')
+    jq -e 'type == "object"' <<<"$current" >/dev/null || {
+      echo "Refusing to overwrite malformed JSON: $dir/models.json" >&2
+      return 1
+    }
+    current=$(cat "$dir/settings.json" 2>/dev/null || echo '{}')
+    jq -e 'type == "object"' <<<"$current" >/dev/null || {
+      echo "Refusing to overwrite malformed JSON: $dir/settings.json" >&2
+      return 1
+    }
+  done
+
   for agent in "${MODELS_AGENTS[@]}"; do
     dir="$HOME/.$agent/agent"
     mkdir -p "$dir"
+    current=$(cat "$dir/models.json" 2>/dev/null || echo '{}')
+    temporary=$(mktemp "$dir/.models.json.XXXXXX")
     jq --argjson provider "$provider" '.providers.local = $provider' \
-      <<<"$(cat "$dir/models.json" 2>/dev/null || echo '{}')" >"$dir/models.json"
+      <<<"$current" >"$temporary"
+    mv "$temporary" "$dir/models.json"
+
+    current=$(cat "$dir/settings.json" 2>/dev/null || echo '{}')
+    temporary=$(mktemp "$dir/.settings.json.XXXXXX")
     jq --arg model "$served" \
       'if .defaultProvider == null or .defaultProvider == "local"
        then .defaultProvider = "local" | .defaultModel = $model else . end' \
-      <<<"$(cat "$dir/settings.json" 2>/dev/null || echo '{}')" >"$dir/settings.json"
+      <<<"$current" >"$temporary"
+    mv "$temporary" "$dir/settings.json"
   done
 }
 

@@ -6,19 +6,24 @@
 #
 # Depends on: nothing.
 
-# Every qualifying GPU's VRAM in MiB, largest first, one per line.
-#
-# OMARCHY_AI_VRAM_MB overrides the probe entirely (tests, dry runs).
-# OMARCHY_AI_GPUS confines the probe to a subset ("0,2"), which is also the
-# subset the engine will be pinned to — the two must agree or a recipe would
-# be sized against cards it cannot use.
-hw_vram_list() {
-  if [[ -n ${OMARCHY_AI_VRAM_MB:-} ]]; then
-    printf '%s\n' "$OMARCHY_AI_VRAM_MB"
+# index,total MiB,free MiB — one GPU per line. Keeping the index attached is
+# important: sorting a bare VRAM list and later launching "all" can size a
+# recipe against one set of cards while Docker receives another.
+hw_gpu_inventory() {
+  if [[ -n ${OMARCHY_AI_GPU_INVENTORY:-} ]]; then
+    printf '%s\n' "$OMARCHY_AI_GPU_INVENTORY"
   elif hw_has_nvidia; then
     nvidia-smi ${OMARCHY_AI_GPUS:+-i "$OMARCHY_AI_GPUS"} \
-      --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null
-  fi | grep -E '^[0-9]+$' | sort -rn || true
+      --query-gpu=index,memory.total,memory.free --format=csv,noheader,nounits 2>/dev/null \
+      | tr -d ' '
+  elif [[ -n ${OMARCHY_AI_VRAM_MB:-} ]]; then
+    awk 'NF { print NR - 1 "," $1 "," $1 }' <<<"$OMARCHY_AI_VRAM_MB"
+  fi | grep -E '^[0-9]+,[0-9]+,[0-9]+$' || true
+}
+
+# Every GPU's total VRAM in MiB, largest first, one per line.
+hw_vram_list() {
+  hw_gpu_inventory | cut -d, -f2 | sort -rn || true
 }
 
 hw_has_nvidia() {
@@ -40,13 +45,28 @@ hw_largest_vram_mb() {
   hw_vram_list | head -1 | grep -E '^[0-9]+$' || echo 0
 }
 
-# The GPU argument for the container runtime: a pinned subset when the user
-# asked for one, otherwise every visible card.
+# Select exactly the card count the recipe declares. Cards with the most free
+# memory win, which naturally leaves a display-attached 3090 until last. Docker
+# treats commas inside --gpus as option separators unless the device request is
+# itself quoted, so multi-card selectors deliberately include literal quotes.
 hw_gpu_selector() {
-  if [[ -n ${OMARCHY_AI_GPUS:-} ]]; then
-    printf 'device=%s' "$OMARCHY_AI_GPUS"
+  local count=$1 min_vram_mb=$2 ids
+  ids=$(hw_gpu_inventory \
+    | awk -F, -v minimum="$min_vram_mb" '$2 >= minimum { print $1 "," $3 }' \
+    | sort -t, -k2,2nr -k1,1n \
+    | head -n "$count" \
+    | cut -d, -f1 \
+    | paste -sd, -)
+
+  if (( $(tr -cd ',' <<<"$ids" | wc -c) + (${#ids} > 0) != count )); then
+    echo "Unable to select $count GPUs with at least $min_vram_mb MiB each." >&2
+    return 1
+  fi
+
+  if ((count == 1)); then
+    printf 'device=%s' "$ids"
   else
-    printf 'all'
+    printf '"device=%s"' "$ids"
   fi
 }
 
