@@ -1,5 +1,8 @@
 #!/bin/bash
-# 0 running · 1 stopped · 2 not set up
+
+# omarchy:summary=Report local AI status
+# omarchy:group=ai
+
 set -euo pipefail
 source "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/local-ai.sh"
 case "$(engine_state)" in

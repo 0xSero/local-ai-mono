@@ -1,86 +1,62 @@
-# omarchy-local-ai
+# Omarchy Local AI
 
-Turn a big-GPU machine into its own inference server, and wire it into the
-coding agents you already use.
+An installable Omarchy bar plugin for running two pinned local models on one, two, or four RTX 3090 GPUs.
 
-One command reads the GPUs, picks the best model that fits, serves it on
-loopback, proves it generates, and gives `pi` and `omp` a `local` provider
-pointing at it. A bar panel exposes the same lifecycle to the desktop.
+The alpha contract is intentionally literal: one JSON recipe equals one tensor-parallel topology. There is no hidden scaling step and no runtime guessing.
 
-```bash
-omarchy ai setup          # probe, serve, wire the agents
-omarchy ai list           # what fits this machine, what is serving
-omarchy ai stop / start   # free the VRAM for games, get it back
-```
+| Recipe | Model | GPUs | Context |
+|---|---|---:|---:|
+| `qwen36-tp1` | Qwen3.6-35B-A3B GPTQ INT4 | 1 | 131,072 |
+| `qwen36-tp2` | Qwen3.6-35B-A3B GPTQ INT4 | 2 | 131,072 |
+| `qwen36-tp4` | Qwen3.6-35B-A3B GPTQ INT4 | 4 | 131,072 |
+| `qwen38-tp1` | Qwen3.8-27B AWQ INT4 | 1 | 40,960 |
+| `qwen38-tp2` | Qwen3.8-27B AWQ INT4 | 2 | 131,072 |
+| `qwen38-tp4` | Qwen3.8-27B AWQ INT4 | 4 | 131,072 |
 
-## Models
+Every recipe pins the serving image by digest and the Hugging Face model revision by commit. CUDA graphs stay enabled and eager mode is never forced.
 
-Two, named for what they are to the person choosing. Quantization, engine,
-tensor parallelism and context window are recipe internals that can change
-without the choice changing.
-
-| Tier | Model | Why | Context on 1× 24 GB |
-|---|---|---|---|
-| `fast` | Qwen3.6-35B-A3B (GPTQ-INT4) | MoE — only ~3B parameters fire per token, so it decodes quickest | 131,072 |
-| `smart` | Qwen3.8-27B (AWQ-INT4) | dense — every parameter works on every token | 40,960 |
-
-The bigger model is the *faster* one: a mixture-of-experts activates a fraction
-of its weights per token. Measured on 2× 3090, the 35B ran 136 tok/s against
-the dense 27B's ~92.
-
-Both run on a **single 24 GB card** and scale themselves up as you add cards —
-tensor parallelism rises and `smart` gains the full 131k window at two GPUs.
-The context gap on one card is arithmetic, not preference: dense attention needs
-4.16 GiB of KV at 131k where the MoE needs 1.32 GiB.
-
-Both serve on vLLM with FP8 KV cache and identical flag patterns, so the two
-recipes differ only in which weights they load. Both carry tool-call and
-reasoning parsers — agents get real `tool_calls` JSON and clean content — and
-both accept images, so the agent can screenshot your desktop and act on what it
-sees.
-
-A single recipe covers 1, 2 and 4 GPUs: a `scale` map keyed by card count is
-merged over the base, raising tensor parallelism and context as the hardware
-allows.
-
-## Layout
-
-```
-lib/        the four modules — hardware, registry, models, engine
-bin/        thin CLI wrappers, no logic
-share/      the shipped recipe catalog
-shell/      the Local AI and Fable bar panels
-test/       one suite per module
-docs/       architecture
-```
-
-`docs/architecture.md` is the map: what each module owns, why the dependencies
-point the way they do, and the two or three decisions that are not obvious from
-the code.
-
-## Publishing a recipe
-
-Push an `omarchy-recipe.json` to the root of any public repo owned by an account
-the catalog lists as a source, then:
+## Install the private alpha
 
 ```bash
-omarchy ai sync
+omarchy plugin add git@github.com:0xSero/omarchy-local-ai.git
+omarchy plugin enable sero.local-ai
 ```
 
-Remote recipes override shipped ones that share a name, so a repo can refine
-what ships without a release here.
+The bar widget invokes the checkout's own scripts through the source directory Omarchy injects into the plugin manifest. It does not depend on globally installed `omarchy-ai-*` commands.
 
-## Tests
+Open the Local AI widget and choose one of the six recipes. Setup installs Docker and the NVIDIA container toolkit when needed, launches exactly the recipe's GPU count, proves a real chat completion, then wires the local OpenAI-compatible provider into Pi and OMP.
+
+Ori is visible in Omarchy as an agent, but its current CLI does not accept this direct local OpenAI-compatible provider. The plugin does not pretend otherwise: Pi and OMP are wired today; Ori needs upstream custom-provider support before it can be pointed at this endpoint.
+
+## Registry
+
+[`share/registry.json`](share/registry.json) is an independent, pure-data registry. Add or change recipes there without changing the engine, model selection, or UI code.
+
+To consume a separately hosted registry, point sync at one exact JSON document:
+
+```bash
+OMARCHY_AI_REGISTRY_URL=https://example.com/registry.json ./bin/omarchy-ai-sync
+```
+
+Sync downloads into a temporary file, validates the six required alpha recipes plus any additional pinned recipes, and atomically replaces the cached catalog. A failed download or invalid registry leaves the last good catalog untouched. Account-wide GitHub repository scanning is deliberately not part of the design.
+
+## Code map
+
+```text
+manifest.json   third-party Omarchy plugin contract
+shell/          one self-contained bar widget
+share/          pinned six-recipe registry
+lib/            hardware, registry, model, and engine modules
+bin/            thin plugin-local commands
+test/           sandboxed module and plugin tests
+docs/           architecture and live RTX 3090 acceptance evidence
+```
+
+## Validate
 
 ```bash
 ./test/all
+omarchy plugin validate .
 ```
 
-Every suite runs sandboxed — a temporary `HOME`, a mock docker, hardware
-described as JSON — so nothing touches a real machine and the whole thing runs
-in a second.
-
-## Requirements
-
-An NVIDIA GPU with 24 GB or more, Docker, `jq`, and `curl`. Setup installs
-Docker and the NVIDIA container toolkit if they are missing.
+Live results and the acceptance method are in [`docs/acceptance-3090.md`](docs/acceptance-3090.md).

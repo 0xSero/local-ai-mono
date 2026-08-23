@@ -5,12 +5,12 @@ import qs.Commons
 import qs.Ui
 
 // Local AI: one bar icon plus a popup for the model server. The popup is
-// deliberately small — the serving state and the two modes, fast and smart.
+// deliberately small — serving state plus six immutable model/TP recipes.
 // Everything else (sync, logs, removal) lives in the omarchy-ai-* commands.
 Panel {
   id: root
-  moduleName: "omarchy.local-ai"
-  ipcTarget: "omarchy.local-ai"
+  moduleName: "sero.local-ai"
+  ipcTarget: "sero.local-ai"
   manageIpc: false
 
   property var info: ({})
@@ -18,7 +18,8 @@ Panel {
   property bool cursorActive: false
 
   readonly property var recipes: info.recipes instanceof Array ? info.recipes : []
-  readonly property bool installed: !!info.state && info.state !== "not-setup"
+  readonly property string pluginDir: String(root.manifest && root.manifest.__sourceDir || "")
+  readonly property bool setup: !!info.state && info.state !== "not-setup"
   readonly property bool serving: info.state === "running"
   readonly property color dim: bar ? Qt.darker(bar.foreground, 1.55) : Color.foreground
   readonly property color hoverFill: bar ? Style.hoverFillFor(bar.foreground, Color.accent) : "transparent"
@@ -32,8 +33,21 @@ Panel {
     if (!listProc.running) listProc.running = true
   }
 
+  function cli(name) {
+    return pluginDir + "/bin/" + name
+  }
+
   function toggleServer() {
-    if (!toggleProc.running) toggleProc.running = true
+    if (setup) {
+      if (!toggleProc.running) toggleProc.running = true
+      return
+    }
+    for (var i = 0; i < recipes.length; i++) {
+      if (recipes[i].fits) {
+        switchTo(recipes[i])
+        return
+      }
+    }
   }
 
   function switchTo(recipe) {
@@ -43,7 +57,7 @@ Panel {
       if (!serving) toggleServer()
       return
     }
-    if (bar) bar.run("omarchy-launch-floating-terminal-with-presentation 'omarchy-ai-setup " + recipe.name + "'")
+    if (bar) bar.run("omarchy-launch-floating-terminal-with-presentation '" + cli("omarchy-ai-setup") + " " + recipe.name + "'")
     close()
   }
 
@@ -58,9 +72,9 @@ Panel {
     recipeIndex = Math.max(0, Math.min(recipes.length - 1, recipeIndex + delta))
   }
 
-  visible: installed
-  implicitWidth: installed ? button.implicitWidth : 0
-  implicitHeight: installed ? button.implicitHeight : 0
+  visible: pluginDir !== ""
+  implicitWidth: visible ? button.implicitWidth : 0
+  implicitHeight: visible ? button.implicitHeight : 0
 
   onOpenedChanged: {
     if (opened) {
@@ -71,7 +85,8 @@ Panel {
   }
 
   IpcHandler {
-    target: "omarchy.local-ai"
+    target: "sero.local-ai"
+    Component.onDestruction: enabled = false
 
     function open(): void { root.open() }
     function close(): void { root.close() }
@@ -83,7 +98,7 @@ Panel {
 
   Process {
     id: listProc
-    command: ["omarchy-ai-list", "--json"]
+    command: [root.cli("omarchy-ai-list"), "--json"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -94,7 +109,7 @@ Panel {
 
   Process {
     id: toggleProc
-    command: ["omarchy-ai-toggle"]
+    command: [root.cli("omarchy-ai-toggle")]
     onExited: root.refresh()
   }
 
@@ -110,7 +125,8 @@ Panel {
     fontSize: Style.font.caption
     opacity: root.serving ? 1 : 0.5
     tooltipText: root.serving ? "Local AI: serving " + String(root.info.active || "") + " — right-click to unload"
-                              : "Local AI: stopped — right-click to load"
+                              : root.setup ? "Local AI: stopped — right-click to load"
+                                           : "Local AI: choose a pinned RTX 3090 recipe"
     onPressed: function(b) {
       if (b === Qt.RightButton) root.toggleServer()
       else root.toggle()
@@ -170,7 +186,8 @@ Panel {
             }
 
             Text {
-              text: (root.serving ? "SERVING · " + root.activeLabel : "UNLOADED").toUpperCase()
+              text: (root.serving ? "SERVING · " + root.activeLabel
+                    : root.setup ? "UNLOADED" : "CHOOSE A RECIPE").toUpperCase()
               color: root.serving ? root.bar.foreground : root.dim
               opacity: root.serving ? 0.75 : 1
               font.family: root.bar.fontFamily
@@ -186,7 +203,7 @@ Panel {
             id: heroToggle
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            text: root.serving ? "Unload" : "Load"
+            text: root.serving ? "Unload" : root.setup ? "Load" : "Set up"
             fontSize: Style.font.bodySmall
             foreground: root.bar.foreground
             fontFamily: root.bar.fontFamily
@@ -200,7 +217,7 @@ Panel {
 
         PanelSeparator { foreground: root.bar.foreground }
 
-        // ---------- The two modes ----------
+        // ---------- Pinned model/topology recipes ----------
         Column {
           width: parent.width
           spacing: Style.space(6)

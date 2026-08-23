@@ -1,4 +1,8 @@
 #!/bin/bash
+
+# omarchy:summary=Follow the local AI model server logs
+# omarchy:group=ai
+
 set -euo pipefail
 source "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/local-ai.sh"
 engine_logs

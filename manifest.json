@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "sero.local-ai",
+  "name": "Local AI for RTX 3090",
+  "version": "0.1.0-alpha.1",
+  "author": "0xSero",
+  "description": "Run pinned local AI recipes on one, two, or four RTX 3090 GPUs",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "shell/plugins/panels/local-ai/Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Local AI",
+    "description": "Choose and control a pinned RTX 3090 inference recipe",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

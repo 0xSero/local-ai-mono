@@ -1,4 +1,8 @@
 #!/bin/bash
+
+# omarchy:summary=Start or stop the configured local AI model server
+# omarchy:group=ai
+
 set -euo pipefail
 source "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/local-ai.sh"
 model_is_setup || { echo "Local AI is not set up. Run: omarchy ai setup" >&2; exit 2; }

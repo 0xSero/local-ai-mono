@@ -1,5 +1,9 @@
 #!/bin/bash
-# List models, what fits this machine, and the serving state.
+
+# omarchy:summary=List pinned local AI recipes and serving state
+# omarchy:group=ai
+# omarchy:args=[--json]
+
 set -euo pipefail
 source "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/local-ai.sh"
 

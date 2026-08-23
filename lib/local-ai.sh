@@ -12,5 +12,5 @@ source "$LOCAL_AI_ROOT/lib/engine.sh"     # models + hardware
 # Panels and CLI commands poke the shell so the bar reflects state changes
 # immediately instead of waiting for its poll.
 local_ai_notify_shell() {
-  omarchy-shell -q omarchy.local-ai refresh 2>/dev/null || true
+  omarchy-shell -q sero.local-ai refresh 2>/dev/null || true
 }
