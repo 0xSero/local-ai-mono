@@ -145,7 +145,7 @@ Item {
           id: selectedBar
           width: parent.width; height: Style.space(44)
           Rule { width: parent.width; anchors.top: parent.top }
-          Meta { anchors.left: parent.left; anchors.right: primaryAction.left; anchors.rightMargin: Style.space(18); anchors.verticalCenter: parent.verticalCenter; text: root.selected() ? root.selected().name + " · " + root.selected().acceleratorCount + " GPU" + (root.selected().acceleratorCount === 1 ? "" : "s") + " · " + root.selected().hardware : "No compatible recipe"; elide: Text.ElideRight }
+          Meta { anchors.left: parent.left; anchors.right: primaryAction.left; anchors.rightMargin: Style.space(18); anchors.verticalCenter: parent.verticalCenter; text: root.selected() ? root.selected().name + " · " + root.selected().acceleratorCount + " GPU" + (root.selected().acceleratorCount === 1 ? "" : "s") + " · " + root.selected().hardware : "No matching recipe"; elide: Text.ElideRight }
           Link { id: primaryAction; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; enabled: Boolean(root.selected()) && !root.busy; text: root.busy === "Downloading" ? Math.round(root.downloadProgress * 100) + "%" : !root.selected() ? "" : !root.selected().downloaded ? "Download" : root.status.running ? "Switch" : "Run"; onTriggered: root.primary() }
         }
       }
