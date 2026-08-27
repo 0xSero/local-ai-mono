@@ -28,6 +28,11 @@ snapshot=$(registry_snapshot_json)
 assert jq -e '.schemaVersion=="local-ai-registry/v1" and .registry.recipeCount==1 and .models[0].name=="Small Registry Model" and .models[0].registrySpeed==42.5 and .hardware.groups[0].registryId=="rtx-3090-24gb"' >/dev/null <<<"$snapshot"
 ok 'hardware and model names come only from referenced registry records'
 
+jq '.id="large-3090" | .hardware_count=4' "$OMARCHY_AI_REGISTRY/recipe/small-3090.json" >"$OMARCHY_AI_REGISTRY/recipe/large-3090.json"
+jq '.recipes += [{id:"large-3090",status:"validated",model_instance_id:"org-small--bf16",hardware_id:"rtx-3090-24gb",hardware_count:4,engine:"sglang",launch_kind:"docker",has_evidence:true}]' "$OMARCHY_AI_REGISTRY/index.json" >"$TMP/index"; mv "$TMP/index" "$OMARCHY_AI_REGISTRY/index.json"
+assert jq -e '[.recipes[].compatibility.acceleratorCount]==[1,4] and [.models[].acceleratorCount]==[1,4]' >/dev/null <<<"$(registry_snapshot_json)"
+jq '.recipes = [.recipes[0]]' "$OMARCHY_AI_REGISTRY/index.json" >"$TMP/index"; mv "$TMP/index" "$OMARCHY_AI_REGISTRY/index.json"; ok 'recipes and selected model variants use fewest GPUs first'
+
 recipe=$(recipe_json small); plan=$(plan_json "$recipe")
 assert jq -e --arg asset "$(realpath "$OMARCHY_AI_REGISTRY/assets/config.yml"):/app/config.yml:ro" '.argv|index("127.0.0.1:12434:30000") and index("device=0") and index($asset) and index("image@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")' >/dev/null <<<"$plan"
 assert jq -e '[.argv[]|select(test("enforce.eager|disable.*cuda.*graph";"i"))]|length==0' >/dev/null <<<"$plan"
@@ -100,6 +105,7 @@ if grep -Eq 'Qwen|Gemma|LFM|Ornith|#[0-9A-Fa-f]{6}' "$ROOT/Panel.qml"; then prin
 assert grep -q 'BarIconButton {' "$ROOT/Panel.qml"
 assert grep -q 'radius: width / 2' "$ROOT/Panel.qml"
 assert grep -q 'Math.round(root.downloadProgress \* 100) + "%"' "$ROOT/Panel.qml"
+assert grep -q 'GPUs detected' "$ROOT/Panel.qml"; assert grep -q 'GPU options' "$ROOT/Panel.qml"
 for label in 'Scan' 'Download' 'Run' 'Unload' 'Open agent' 'Switch running model'; do assert grep -q "$label" "$ROOT/Panel.qml"; done
 ok 'theme-native panel has a circular icon, progress state, and all six lifecycle actions'
 

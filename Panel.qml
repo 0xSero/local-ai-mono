@@ -9,17 +9,16 @@ Panel {
   moduleName: "sero.local-ai"
   ipcTarget: "sero.local-ai"
   manageIpc: false
-
   property var data: ({ models: [], status: { state: "loading" } })
   property string page: "home"; property string selectedId: ""
   property int cursor: 0; property string busy: ""; property string afterAction: ""
   property string errorText: ""; property string lastFailure: ""
-
   readonly property string sourceDir: String(Qt.resolvedUrl(".")).replace(/^file:\/\//, "").replace(/\/$/, "")
   readonly property string cli: sourceDir + "/bin/omarchy-local-ai"
-  readonly property var models: data.models || []; readonly property var status: data.status || {}
-  readonly property color foreground: bar ? bar.foreground : Color.foreground; readonly property color dim: Util.alpha(foreground, 0.55)
-  readonly property var alternateModels: models.filter(function(model) { return !model.active })
+  readonly property var models: data.models || []; readonly property var status: data.status || {}; readonly property var hardwareGroups: data.hardware && data.hardware.groups ? data.hardware.groups : []
+  readonly property int gpuCount: { var total = 0; for (var i = 0; i < hardwareGroups.length; i++) total += Number(hardwareGroups[i].count || 0); return total }
+  readonly property string gpuOptions: { var values = []; for (var i = 0; i < models.length; i++) if (values.indexOf(models[i].acceleratorCount) < 0) values.push(models[i].acceleratorCount); return values.join(" / ") }
+  readonly property int recipeCount: data.registry ? Number(data.registry.recipeCount || 0) : 0; readonly property color foreground: bar ? bar.foreground : Color.foreground; readonly property color dim: Util.alpha(foreground, 0.55)
   readonly property var download: {
     var rows = data.downloads || []
     for (var i = 0; i < rows.length; i++) if (rows[i].id === selectedId) return rows[i]; return null
@@ -157,7 +156,7 @@ Panel {
           Text {
             width: parent.width
             text: root.busy !== "" && root.selectedModel() ? root.selectedModel().name
-              : root.page === "models" ? "Choose a model"
+              : root.page === "models" ? "Choose a recipe"
               : root.page === "model" && root.selectedModel() ? root.selectedModel().name
               : root.status.model || "Local AI"
             color: root.foreground
@@ -172,38 +171,45 @@ Panel {
             width: parent.width
             spacing: Style.space(2)
 
-            Text {
+            MetaText {
               width: parent.width
               text: root.errorText !== "" ? root.errorText
                 : root.busy !== "" ? root.busy
-                : root.page === "models" ? (root.models.length > 0 ? "From ~/omarchy/local-ai" : "No models match this machine")
+                : root.page === "models" ? (root.models.length > 0 ? "GPU options · " + root.gpuOptions : "No recipes match this machine")
                 : root.page === "model" && root.selectedModel()
                   ? (root.selectedModel().active ? String(root.status.state || "stopped")
-                    : root.selectedModel().downloaded ? "downloaded · " + root.selectedModel().precision
-                    : root.selectedModel().precision + " · ready to download")
+                    : root.selectedModel().precision + " · " + root.selectedModel().engine + " · " + root.selectedModel().acceleratorCount + " GPU" + (root.selectedModel().acceleratorCount === 1 ? "" : "s"))
                 : root.status.ready ? "ready" : root.status.running ? "loading" : "nothing running"
               color: root.errorText !== "" ? root.foreground : root.dim
-              font.family: root.bar.fontFamily
-              font.pixelSize: Style.font.bodySmall
               wrapMode: Text.WordWrap
             }
 
-            Text {
-              visible: root.busy === "" && root.page === "home" && root.status.ready
-              text: "Running locally"
-              color: root.dim
-              font.family: root.bar.fontFamily
-              font.pixelSize: Style.font.bodySmall
-            }
+            MetaText { visible: root.busy === "" && root.page === "home" && root.status.ready; text: "Running locally" }
 
-            Text {
+            MetaText {
               visible: root.busy === "" && root.page === "home" && root.status.ready && Boolean(root.data.benchmark)
               text: Number(root.data.benchmark ? root.data.benchmark.medianTokensPerSecond : 0).toFixed(1) + " tok/s"
-              color: root.dim
-              font.family: root.bar.fontFamily
-              font.pixelSize: Style.font.bodySmall
             }
           }
+        }
+
+        Column {
+          width: parent.width
+          spacing: Style.space(3)
+          visible: root.busy === "" && root.page === "home"
+
+          MetaText {
+            text: root.gpuCount > 0 ? root.gpuCount + " GPUs detected" : snapshot.running ? "Detecting hardware" : "No GPUs detected"
+            color: root.foreground
+          }
+          Repeater {
+            model: root.hardwareGroups
+            MetaText {
+              required property var modelData
+              width: content.width; text: modelData.count + " × " + (modelData.registryName || modelData.product); elide: Text.ElideRight
+            }
+          }
+          MetaText { text: root.recipeCount + " compatible recipes · " + root.gpuOptions + " GPU options" }
         }
 
         Column {
@@ -233,15 +239,9 @@ Panel {
           spacing: Style.space(12)
           visible: root.busy === "" && root.page === "home"
 
-          ActionLink { text: "Change"; onTriggered: root.showModels() }
-          Hairline { visible: root.alternateModels.length > 0 }
-
-          Repeater {
-            model: root.alternateModels
-            ActionLink { required property var modelData; text: modelData.name; dimmed: true; onTriggered: root.showModel(modelData) }
-          }
-
-          ActionLink { text: "Scan"; visible: root.models.length === 0; onTriggered: root.runAction("Scanning", ["scan"], "models") }
+          ActionLink { text: root.status.running ? "Change recipe" : "Choose recipe"; onTriggered: root.showModels() }
+          Hairline {}
+          ActionLink { text: "Scan again"; onTriggered: root.runAction("Scanning", ["scan"], "models") }
         }
 
         Column {
@@ -271,7 +271,7 @@ Panel {
                 }
                 Text {
                   id: modelState
-                  text: modelData.active ? String(root.status.state || "stopped") : modelData.downloaded ? "downloaded" : "download"
+                  text: modelData.acceleratorCount + " GPU" + (modelData.acceleratorCount === 1 ? "" : "s")
                   color: root.dim
                   font.family: root.bar.fontFamily
                   font.pixelSize: Style.font.caption
@@ -327,6 +327,12 @@ Panel {
       cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
       onClicked: parent.triggered()
     }
+  }
+
+  component MetaText: Text {
+    color: root.dim
+    font.family: root.bar.fontFamily
+    font.pixelSize: Style.font.bodySmall
   }
 
   component Hairline: Rectangle {

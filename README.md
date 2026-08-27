@@ -5,17 +5,13 @@ One small Omarchy plugin for local inference. It reads the normalized
 `~/omarchy/local-ai/registry`. Its six actions are Scan, Download, Run, Unload,
 Open agent, and Switch. Run requires a real completion; failed switches restore
 the previous managed model.
-
-The panel is deliberately quiet: text only, one level at a time, and no custom
-colors, icons, cards, hardware dashboard, or invented catalog data.
-
+The theme-native panel auto-detects local GPUs and lets users choose every
+compatible 1, 2, 4, or larger GPU recipe in ascending order. It uses no invented data.
 ## Install
-
 ```bash
 omarchy plugin add https://github.com/0xSero/omarchy-local-ai.git --yes
 omarchy plugin enable sero.local-ai
 ```
-
 ## CLI
 ```bash
 ./bin/omarchy-local-ai scan
@@ -25,19 +21,11 @@ omarchy plugin enable sero.local-ai
 ./bin/omarchy-local-ai open-agent
 ./bin/omarchy-local-ai switch <model-or-recipe>
 ```
-
 Diagnostic commands remain available for measured acceptance, not as extra UI.
-
 ## Boundaries
-
-- The registry is the only source of models and launch recipes.
-- Only validated, immutable Docker recipes are accepted.
-- CUDA graphs stay enabled; eager or graph-disabling flags are rejected.
-- Serving binds to `127.0.0.1` only.
-- Downloads do not launch an inference server.
-- Run and switch require the download first.
-- OMP and Pi agent settings are written atomically and removed on unload.
+- The registry is the only source; only validated, immutable Docker recipes run.
+- CUDA graphs stay enabled; eager and graph-disabling flags are rejected.
+- Serving binds to `127.0.0.1`; downloads never launch inference.
+- Run and switch require a download; OMP and Pi wiring is atomic and reversible.
 - A failed switch restores the previous managed container.
-
-Run `./test/all`. The complete repository, including tests and docs, stays under
-1,000 lines.
+Run `./test/all`. The complete repository, tests and docs included, stays under 1,000 lines.

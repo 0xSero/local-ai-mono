@@ -152,9 +152,9 @@ registry_snapshot_json() {
   done < <(jq -r --argjson ids "$ids" '.recipes[] | select(.status=="validated" and .launch_kind=="docker") | select(.hardware_id as $h | $ids | index($h)) | .id' "$AI_REGISTRY/index.json")
   jq -n --argjson hardware "$hw" --argjson recipes "$recipes" --argjson active "$active" --arg path "$AI_REGISTRY" --argjson total "$(jq '.recipes | length' "$AI_REGISTRY/index.json")" '
     ($active.recipe.id // "") as $activeId
-    | ($recipes | sort_by([(.id != $activeId), (.ready|not), -(.registrySpeed // 0), -(.compatibility.acceleratorCount)])) as $ranked
-    | {schemaVersion:"local-ai-registry/v1",registry:{path:$path,recipeCount:($recipes|length),totalRecipeCount:$total},hardware:$hardware,active:$active,recipes:$recipes,
-      models:[$ranked | group_by(.model.id)[] | .[0] | {id:.model.id,name:.model.name,compatible:.compatible,ready:.ready,
+    | ($recipes | sort_by([(.id != $activeId), .compatibility.acceleratorCount, (.ready|not), -(.registrySpeed // 0), .model.name])) as $ranked
+    | {schemaVersion:"local-ai-registry/v1",registry:{path:$path,recipeCount:($recipes|length),totalRecipeCount:$total},hardware:$hardware,active:$active,recipes:$ranked,
+      models:[$ranked[] | {id:.model.id,name:.model.name,compatible:.compatible,ready:.ready,
         recipeId:.id,engine:.engine.name,precision:.model.weightPrecision,hardware:.localProduct,
         acceleratorCount:.compatibility.acceleratorCount,registrySpeed:.registrySpeed,active:(.id==$activeId)}]}
   '
