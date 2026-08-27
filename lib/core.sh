@@ -312,9 +312,9 @@ downloads_json() {
     id=$(jq -r '.id' <<<"$recipe"); model=$(jq -r '.model.name' <<<"$recipe"); repository=$(jq -r '.model.repository' <<<"$recipe"); expected=$(jq -r '.model.downloadBytes' <<<"$recipe"); image=$(jq -r '.launch.image' <<<"$recipe")
     bytes=0
     repo_cache="$AI_USER_HOME/.cache/huggingface/hub/models--${repository//\//--}"
-    if [[ -d $repo_cache ]]; then bytes=$(du -sk "$repo_cache" | awk '{print $1 * 1024}'); fi
+    if [[ -d $repo_cache ]]; then bytes=$(du -skL "$repo_cache" | awk '{print $1 * 1024}'); fi
     while IFS= read -r source; do
-      source=${source/#\~/$AI_USER_HOME}; [[ -d $source ]] || continue; size=$(du -sk "$source" | awk '{print $1 * 1024}'); bytes=$((bytes + size))
+      source=${source/#\~/$AI_USER_HOME}; [[ -d $source ]] || continue; size=$(du -skL "$source" | awk '{print $1 * 1024}'); bytes=$((bytes + size))
     done < <(jq -r '.launch.mounts[]? | select((.source|startswith("~/.cache/")) and (.target|test("/models$"))) | .source' <<<"$recipe")
     image_ready=false; docker image inspect "$image" >/dev/null 2>&1 && image_ready=true
     model_ready=false; ((expected > 0 && bytes * 100 >= expected * 85)) && model_ready=true
