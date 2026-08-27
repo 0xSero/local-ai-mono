@@ -14,13 +14,13 @@ Panel {
   property int cursor: 0
   property bool keyboardCursor: false
 
-  readonly property string sourceDir: manifest && manifest.__sourceDir ? String(manifest.__sourceDir) : ""
+  readonly property string sourceDir: String(Qt.resolvedUrl(".")).replace(/^file:\/\//, "").replace(/\/$/, "")
   readonly property string cli: sourceDir + "/bin/omarchy-local-ai"
   readonly property var models: data.models || []
   readonly property var hardware: data.hardware && data.hardware.groups ? data.hardware.groups : []
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color dim: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.55)
-  readonly property color hover: Style.hoverCursorFillFor(foreground, Color.accent)
+  readonly property color hover: Style.hoverFillFor(foreground, Color.accent)
 
   function refresh() { if (sourceDir !== "" && !snapshot.running) snapshot.running = true }
   function select(delta) {
@@ -39,15 +39,6 @@ Panel {
   }
 
   onOpenedChanged: if (opened) { keyboardCursor = false; refresh() }
-
-  IpcHandler {
-    target: "sero.local-ai"
-    Component.onDestruction: enabled = false
-    function open(): void { root.open() }
-    function close(): void { root.close() }
-    function toggle(): void { root.toggle() }
-    function refresh(): void { root.refresh() }
-  }
 
   Process {
     id: snapshot

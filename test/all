@@ -61,7 +61,8 @@ assert jq -e '(.providers.local==null)' "$HOME/.omp/agent/models.json" >/dev/nul
 ok 'OMP and Pi wiring is minimal and reversible'
 
 assert jq -e '.id=="sero.local-ai" and .entryPoints.barWidget=="Panel.qml"' "$ROOT/manifest.json" >/dev/null
-assert grep -q 'manifest.__sourceDir' "$ROOT/Panel.qml"
+assert grep -q 'Qt.resolvedUrl' "$ROOT/Panel.qml"
+if grep -q 'IpcHandler' "$ROOT/Panel.qml"; then exit 1; fi
 if grep -Eq '#[0-9A-Fa-f]{6}' "$ROOT/Panel.qml"; then exit 1; fi
 ok 'plugin is installable and inherits the system theme'
 

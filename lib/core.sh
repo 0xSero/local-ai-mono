@@ -12,7 +12,7 @@ AI_CATALOG="$AI_STATE/catalog.json"
 AI_ACTIVE="$AI_STATE/active.json"
 
 fail() { echo "local-ai: $*" >&2; return 1; }
-notify() { omarchy-shell -q sero.local-ai refresh 2>/dev/null || true; }
+notify() { true; }
 
 catalog_valid() {
   jq -e '
