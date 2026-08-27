@@ -313,10 +313,14 @@ wire_agents() {
 harness_bin() { [[ -x $AI_USER_HOME/.local/bin/$1 ]] && printf '%s\n' "$AI_USER_HOME/.local/bin/$1" || command -v "$1"; }
 
 launch_tui() {
-  local command encoded
+  local command encoded runtime signature
   printf -v command '%q ' omarchy-launch-tui --app-id=org.omarchy.agent "$@"
   encoded=$(jq -Rn --arg command "$command" '$command')
-  hyprctl dispatch "hl.dsp.exec_cmd($encoded)" >/dev/null
+  runtime=${XDG_RUNTIME_DIR:-/run/user/$UID}
+  signature=${HYPRLAND_INSTANCE_SIGNATURE:-}
+  [[ -n $signature && -d $runtime/hypr/$signature ]] || signature=$(find "$runtime/hypr" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %f\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-)
+  [[ -n $signature ]] || fail "Hyprland session not found"
+  HYPRLAND_INSTANCE_SIGNATURE=$signature hyprctl dispatch "hl.dsp.exec_cmd($encoded)" >/dev/null
 }
 
 claude_bridge() {

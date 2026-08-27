@@ -116,7 +116,8 @@ ok 'theme-native panel has a circular icon, progress state, and all six lifecycl
 
 assert grep -q 'ANTHROPIC_BASE_URL=http://127.0.0.1:12435' "$ROOT/lib/core.sh"
 assert grep -q '127.0.0.1 --port 12435' "$ROOT/lib/core.sh"
-hyprctl() { printf '%s\n' "$*" >"$TMP/hyprctl"; }; launch_tui pi --test; assert grep -q 'hl.dsp.exec_cmd.*omarchy-launch-tui.*pi.*--test' "$TMP/hyprctl"; unset -f hyprctl
+mkdir -p "$TMP/runtime/hypr/test"; XDG_RUNTIME_DIR="$TMP/runtime" HYPRLAND_INSTANCE_SIGNATURE=test
+hyprctl() { printf '%s\n' "$*" >"$TMP/hyprctl"; }; launch_tui pi --test; assert grep -q 'hl.dsp.exec_cmd.*omarchy-launch-tui.*pi.*--test' "$TMP/hyprctl"; unset -f hyprctl; unset XDG_RUNTIME_DIR HYPRLAND_INSTANCE_SIGNATURE
 assert grep -q 'running " + root.status.model' "$ROOT/Dashboard.qml"
 ok 'agent harnesses launch through Hyprland and active hardware names its model'
 
