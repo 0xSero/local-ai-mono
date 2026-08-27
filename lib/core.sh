@@ -89,7 +89,8 @@ hardware_with_registry() {
 }
 
 resolved_recipe() {
-  local id=$1 local=$2 recipe instance model hardware sweeps='[]' sweep out source
+  local id=$1 local=$2 recipe instance model hardware sweeps='[]' sweep out source registry_root
+  registry_root=$(realpath "$AI_REGISTRY")
   recipe=$(<"$AI_REGISTRY/recipe/$id.json")
   instance=$(<"$AI_REGISTRY/model-instance/$(jq -r '.model_instance_id' <<<"$recipe").json")
   model=$(<"$AI_REGISTRY/model/$(jq -r '.model_id' <<<"$instance").json")
@@ -113,7 +114,8 @@ resolved_recipe() {
       engine:{name:$r.engine.name,version:$r.engine.version,graphMode:$r.engine.graph_mode},
       launch:{adapter:"docker.openai-v1",image:$r.launch.image,entrypoint:($r.launch.entrypoint // null),
         ipc:($r.launch.ipc // null),sharedMemory:($r.launch.shm_size // null),environment:($r.launch.environment // {}),
-        arguments:($r.launch.arguments // []),mounts:($r.launch.mounts // [])},
+        arguments:($r.launch.arguments // []),mounts:($r.launch.mounts // []),devices:($r.launch.devices // []),
+        capAdd:($r.launch.cap_add // []),securityOpt:($r.launch.security_opt // [])},
       serving:{configuredMaxContextTokens:$r.serving.max_context_tokens,tensorParallel:$r.serving.tensor_parallel},
       capabilities:$r.capabilities,localProduct:$g.product,localCount:$g.count,
       compatible:($g.count >= $r.hardware_count),
@@ -131,7 +133,8 @@ resolved_recipe() {
     case $source in
       \~/.cache/*|/dev/dri/by-path) ;;
       /*) fail "registry recipe $id mounts an unsafe host path"; return ;;
-      *) [[ -f $AI_REGISTRY_REPO/$source ]] || { fail "registry recipe $id references missing asset $source"; return; } ;;
+      *) source=$(realpath "$registry_root/$source") || { fail "registry recipe $id references missing asset $source"; return; }
+         [[ $source == "$registry_root/"* ]] || { fail "registry recipe $id references an asset outside the registry"; return; } ;;
     esac
   done < <(jq -r '.launch.mounts[]?.source' <<<"$out")
   printf '%s\n' "$out"
@@ -173,7 +176,8 @@ intel_nodes() {
 }
 
 plan_json() {
-  local recipe=$1 backend count image entry ids='' source target mode shm
+  local recipe=$1 backend count image entry ids='' source target mode shm value registry_root
+  registry_root=$(realpath "$AI_REGISTRY")
   backend=$(jq -r '.compatibility.acceleratorBackend' <<<"$recipe")
   count=$(jq -r '.compatibility.acceleratorCount' <<<"$recipe")
   image=$(jq -r '.launch.image' <<<"$recipe")
@@ -185,18 +189,22 @@ plan_json() {
       [.groups[]|select(.product==$product).devices[]]|sort_by(-.freeMiB)|.[:$need]|map(.index)|join(",")')
     [[ -n $ids ]] || fail "compatible NVIDIA GPUs are busy"
     argv+=(--gpus "device=$ids")
+  elif jq -e '.launch.devices | index("/dev/dri")' >/dev/null <<<"$recipe"; then
+    argv+=(--device /dev/dri:/dev/dri)
   else
     mapfile -t nodes < <(intel_nodes | head -n "$count")
     ((${#nodes[@]} == count)) || fail "Intel render devices are unavailable"
     for node in "${nodes[@]}"; do argv+=(--device "$node:$node"); done
   fi
+  while IFS= read -r value; do [[ $backend == intel-xpu && $value == SYS_PTRACE ]] || { fail "registry requests unsupported capability $value"; return; }; argv+=(--cap-add "$value"); done < <(jq -r '.launch.capAdd[]?' <<<"$recipe")
+  while IFS= read -r value; do [[ $backend == intel-xpu && $value == seccomp=unconfined ]] || { fail "registry requests unsupported security option $value"; return; }; argv+=(--security-opt "$value"); done < <(jq -r '.launch.securityOpt[]?' <<<"$recipe")
   argv+=(--publish "127.0.0.1:$AI_PORT:$(jq -r '.endpoint.containerPort' <<<"$recipe")")
   [[ $(jq -r '.launch.ipc // ""' <<<"$recipe") == "host" ]] && argv+=(--ipc host)
   shm=$(jq -r '.launch.sharedMemory // empty' <<<"$recipe"); [[ -n $shm ]] && argv+=(--shm-size "$shm")
   while IFS=$'\t' read -r source target mode; do
     [[ -n $source && -n $target ]] || continue
-    if [[ $source == \~/* ]]; then source=${source/#\~/$AI_USER_HOME}; elif [[ $source != /* ]]; then source="$AI_REGISTRY_REPO/$source"; fi
-    [[ $source == "$AI_USER_HOME/.cache/"* || $source == "/dev/dri/by-path" || $source == "$AI_REGISTRY_REPO/"* ]] || fail "registry mount is outside the local boundary"
+    if [[ $source == \~/* ]]; then source=${source/#\~/$AI_USER_HOME}; elif [[ $source != /* ]]; then source=$(realpath "$registry_root/$source") || { fail "registry mount is missing"; return; }; fi
+    [[ $source == "$AI_USER_HOME/.cache/"* || $source == "/dev/dri/by-path" || $source == "$registry_root/"* ]] || fail "registry mount is outside the local boundary"
     [[ $source == "$AI_USER_HOME/.cache/"* ]] && mkdir -p "$source"
     argv+=(--volume "$source:$target$mode")
   done < <(jq -r '.launch.mounts[]? | [.source,.target,(if .read_only then ":ro" else "" end)] | @tsv' <<<"$recipe")
@@ -208,7 +216,8 @@ plan_json() {
 }
 
 download_plan_json() {
-  local recipe=$1 image repository revision served source target file pull fetch
+  local recipe=$1 image repository revision served source target file pull fetch registry_root
+  registry_root=$(realpath "$AI_REGISTRY")
   image=$(jq -r '.launch.image' <<<"$recipe")
   repository=$(jq -r '.model.repository' <<<"$recipe")
   revision=$(jq -r '.model.revision' <<<"$recipe")
@@ -217,8 +226,8 @@ download_plan_json() {
   local -a fetch_argv=(docker run --rm --label io.omarchy.local-ai.download=1 --entrypoint hf)
   while IFS=$'\t' read -r source target; do
     [[ -n $source && -n $target && $source != /dev/dri/by-path ]] || continue
-    if [[ $source == \~/* ]]; then source=${source/#\~/$AI_USER_HOME}; elif [[ $source != /* ]]; then source="$AI_REGISTRY_REPO/$source"; fi
-    [[ $source == "$AI_USER_HOME/.cache/"* || $source == "$AI_REGISTRY_REPO/"* ]] || fail "registry cache mount is outside the local boundary"
+    if [[ $source == \~/* ]]; then source=${source/#\~/$AI_USER_HOME}; elif [[ $source != /* ]]; then source=$(realpath "$registry_root/$source") || { fail "registry mount is missing"; return; }; fi
+    [[ $source == "$AI_USER_HOME/.cache/"* || $source == "$registry_root/"* ]] || fail "registry cache mount is outside the local boundary"
     mkdir -p "$source"; fetch_argv+=(--volume "$source:$target")
   done < <(jq -r '.launch.mounts[]? | select(.target=="/models" or (.target|contains("huggingface"))) | [.source,.target] | @tsv' <<<"$recipe")
   fetch_argv+=("$image" download "$repository" --revision "$revision")

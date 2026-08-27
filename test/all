@@ -5,7 +5,7 @@ ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 export OMARCHY_AI_USER_HOME="$TMP/user" OMARCHY_AI_STATE="$TMP/state" OMARCHY_AI_CACHE="$TMP/cache" OMARCHY_AI_REGISTRY="$TMP/registry"
 export OMARCHY_AI_HARDWARE_JSON='{"groups":[{"backend":"nvidia","product":"NVIDIA GeForce RTX 3090","count":4,"memoryBytesEach":25769803776,"devices":[{"index":0,"totalMiB":24576,"freeMiB":23000},{"index":1,"totalMiB":24576,"freeMiB":23000},{"index":2,"totalMiB":24576,"freeMiB":23000},{"index":3,"totalMiB":24576,"freeMiB":23000}]}],"dockerReady":true,"diskFreeBytes":999999999999}'
-mkdir -p "$OMARCHY_AI_USER_HOME" "$OMARCHY_AI_STATE" "$OMARCHY_AI_CACHE" "$OMARCHY_AI_REGISTRY"/{hardware,model,model-instance,recipe,speed-sweeps}
+mkdir -p "$OMARCHY_AI_USER_HOME" "$OMARCHY_AI_STATE" "$OMARCHY_AI_CACHE" "$OMARCHY_AI_REGISTRY"/{assets,hardware,model,model-instance,recipe,speed-sweeps}; touch "$OMARCHY_AI_REGISTRY/assets/config.yml"
 
 digest=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 revision=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
@@ -13,7 +13,7 @@ jq -n '{schema_version:"local-ai-registry/v1",id:"rtx-3090-24gb",name:"GeForce R
 jq -n '{schema_version:"local-ai-registry/v1",id:"small",name:"Small Registry Model"}' >"$OMARCHY_AI_REGISTRY/model/small.json"
 jq -n --arg revision "$revision" '{schema_version:"local-ai-registry/v1",id:"org-small--bf16",model_id:"small",repository:"org/small",revision:$revision,weights:{format:"safetensors",precision:"BF16",size_gb:0.0000001}}' >"$OMARCHY_AI_REGISTRY/model-instance/org-small--bf16.json"
 jq -n --arg digest "$digest" '{schema_version:"local-ai-registry/v1",id:"small-3090",status:"validated",model_instance_id:"org-small--bf16",hardware_id:"rtx-3090-24gb",hardware_count:1,
-  engine:{name:"sglang",version:"test",graph_mode:"full"},launch:{kind:"docker",image:("image@sha256:"+$digest),container_port:30000,entrypoint:"/bin/server",ipc:"host",shm_size:"1g",environment:{A:"B"},mounts:[{source:"~/.cache/huggingface",target:"/root/.cache/huggingface",read_only:false}],arguments:["--model","org/small"]},
+  engine:{name:"sglang",version:"test",graph_mode:"full"},launch:{kind:"docker",image:("image@sha256:"+$digest),container_port:30000,entrypoint:"/bin/server",ipc:"host",shm_size:"1g",environment:{A:"B"},mounts:[{source:"~/.cache/huggingface",target:"/root/.cache/huggingface",read_only:false},{source:"assets/config.yml",target:"/app/config.yml",read_only:true}],arguments:["--model","org/small"]},
   serving:{max_context_tokens:8192,tensor_parallel:1},capabilities:{chat:true,reasoning:false,tools:false,vision:false},speed_sweeps_ids:["small-sweep"]}' >"$OMARCHY_AI_REGISTRY/recipe/small-3090.json"
 jq -n '{schema_version:"local-ai-registry/v1",id:"small-sweep",recipe_id:"small-3090",rows:[{status:"accepted",decode_tok_s:42.5}]}' >"$OMARCHY_AI_REGISTRY/speed-sweeps/small-sweep.json"
 jq -n '{schema_version:"local-ai-registry/v1",recipes:[{id:"small-3090",status:"validated",model_instance_id:"org-small--bf16",hardware_id:"rtx-3090-24gb",hardware_count:1,engine:"sglang",launch_kind:"docker",has_evidence:true}]}' >"$OMARCHY_AI_REGISTRY/index.json"
@@ -29,9 +29,15 @@ assert jq -e '.schemaVersion=="local-ai-registry/v1" and .registry.recipeCount==
 ok 'hardware and model names come only from referenced registry records'
 
 recipe=$(recipe_json small); plan=$(plan_json "$recipe")
-assert jq -e '.argv|index("127.0.0.1:12434:30000") and index("device=0") and index("image@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")' >/dev/null <<<"$plan"
+assert jq -e --arg asset "$(realpath "$OMARCHY_AI_REGISTRY/assets/config.yml"):/app/config.yml:ro" '.argv|index("127.0.0.1:12434:30000") and index("device=0") and index($asset) and index("image@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")' >/dev/null <<<"$plan"
 assert jq -e '[.argv[]|select(test("enforce.eager|disable.*cuda.*graph";"i"))]|length==0' >/dev/null <<<"$plan"
 ok 'launch plan is digest-pinned, loopback-only, and keeps CUDA graphs'
+
+intel=$(jq '.compatibility.acceleratorBackend="intel-xpu" | .launch.devices=["/dev/dri"] | .launch.capAdd=["SYS_PTRACE"] | .launch.securityOpt=["seccomp=unconfined"]' <<<"$recipe"); plan=$(plan_json "$intel")
+assert jq -e '.argv|index("/dev/dri:/dev/dri") and index("SYS_PTRACE") and index("seccomp=unconfined")' >/dev/null <<<"$plan"
+ok 'Intel Docker plan preserves the validated device and security contract'
+if plan_json "$(jq '.compatibility.acceleratorBackend="intel-xpu" | .launch.capAdd=["NET_ADMIN"]' <<<"$recipe")" >/dev/null 2>&1; then printf 'not ok - unsafe capability accepted\n' >&2; exit 1; fi
+ok 'registry cannot request arbitrary container capabilities'
 
 download=$(download_plan_json "$recipe")
 assert jq -e '

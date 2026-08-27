@@ -1,15 +1,10 @@
 # Omarchy Local AI
 
-One small Omarchy plugin for local inference. It reads the public
-[`0xSero/local-ai-registry`](https://github.com/0xSero/local-ai-registry) checkout at
-`~/omarchy/local-ai` and presents six actions:
-
-1. **Scan** — refresh the registry and match recipes to this computer.
-2. **Download** — fetch one exact model revision without starting a server.
-3. **Run** — load one downloaded model and require a real completion.
-4. **Unload** — free the hardware but keep the download.
-5. **Open agent** — open Omarchy's own agent picker with the local model wired in.
-6. **Switch** — replace the running model; restore it if the new model fails.
+One small Omarchy plugin for local inference. It reads the normalized
+[`0xSero/local-ai-registry`](https://github.com/0xSero/local-ai-registry) contract at
+`~/omarchy/local-ai/registry`. Its six actions are Scan, Download, Run, Unload,
+Open agent, and Switch. Run requires a real completion; failed switches restore
+the previous managed model.
 
 The panel is deliberately quiet: text only, one level at a time, and no custom
 colors, icons, cards, hardware dashboard, or invented catalog data.
@@ -22,7 +17,6 @@ omarchy plugin enable sero.local-ai
 ```
 
 ## CLI
-
 ```bash
 ./bin/omarchy-local-ai scan
 ./bin/omarchy-local-ai download <model-or-recipe>
@@ -32,8 +26,7 @@ omarchy plugin enable sero.local-ai
 ./bin/omarchy-local-ai switch <model-or-recipe>
 ```
 
-`status`, `snapshot`, `downloads`, `task`, and `benchmark` remain available for
-diagnosis and measured acceptance. They are not extra UI features.
+Diagnostic commands remain available for measured acceptance, not as extra UI.
 
 ## Boundaries
 
