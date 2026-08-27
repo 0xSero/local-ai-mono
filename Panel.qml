@@ -74,8 +74,8 @@ Panel {
 
         Column {
           width: parent.width; spacing: Style.space(3)
-          Text { text: root.status.model || "Local AI"; color: root.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.heading; font.weight: Font.Medium }
-          Meta { text: root.errorText || root.busy || (root.status.ready ? "API + " + (root.status.tools ? "tools ready · " : "chat only · ") + root.vram() : root.status.running ? "loading" : "nothing running") }
+          Text { width: parent.width; text: root.status.model || "Local AI"; color: root.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.heading; font.weight: Font.Medium; elide: Text.ElideRight }
+          Meta { width: parent.width; text: root.errorText || root.busy || (root.status.ready ? "API + " + (root.status.tools ? "tools ready · " : "chat only · ") + root.vram() : root.status.running ? "loading" : "nothing running") }
         }
         Column {
           width: parent.width; spacing: Style.space(3)
@@ -94,7 +94,7 @@ Panel {
     }
   }
 
-  component Meta: Text { color: root.dim; font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall }
+  component Meta: Text { color: root.dim; font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight; maximumLineCount: 1 }
   component Link: Text {
     signal triggered()
     color: root.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall

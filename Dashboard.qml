@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import Quickshell
 import Quickshell.Io
+import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
 
@@ -14,7 +15,7 @@ Item {
   property string busy: ""
   property string errorText: ""
   property string notice: ""
-  property bool closingFromHost: false
+  property bool opened: false
   readonly property string sourceDir: String(Qt.resolvedUrl(".")).replace(/^file:\/\//, "").replace(/\/$/, "")
   readonly property string cli: sourceDir + "/bin/omarchy-local-ai"
   readonly property var models: data.models || []
@@ -30,9 +31,9 @@ Item {
   readonly property color dim: Util.alpha(foreground, 0.55)
   readonly property string fontFamily: Style.font.family
 
-  function open(payloadJson) { window.visible = true; refresh(); Qt.callLater(function() { keys.forceActiveFocus() }) }
-  function close() { closingFromHost = true; window.visible = false; closingFromHost = false }
-  function dismiss() { if (shell && typeof shell.hide === "function") shell.hide("sero.local-ai"); else window.visible = false }
+  function open(payloadJson) { opened = true; refresh(); Qt.callLater(function() { keys.forceActiveFocus() }) }
+  function close() { opened = false }
+  function dismiss() { if (shell && typeof shell.hide === "function") shell.hide("sero.local-ai"); else opened = false }
   function refresh() { if (!snapshot.running) snapshot.running = true }
   function choose(index) { if (models.length) selectedIndex = Math.max(0, Math.min(models.length - 1, index)) }
   function selected() { return models.length ? models[selectedIndex] : null }
@@ -49,35 +50,49 @@ Item {
     stderr: StdioCollector { waitForEnd: true; onStreamFinished: if (text.trim()) root.errorText = text.trim().replace(/^local-ai:\s*/, "") }
     onExited: function(exitCode) { if (exitCode !== 0 && !root.errorText) root.errorText = "Action failed"; else if (exitCode === 0) root.notice = root.busy + " complete"; root.busy = ""; root.refresh() }
   }
-  Timer { interval: root.busy ? 2000 : 5000; running: window.visible; repeat: true; onTriggered: root.refresh() }
+  Timer { interval: root.busy ? 2000 : 5000; running: root.opened; repeat: true; onTriggered: root.refresh() }
 
-  FloatingWindow {
+  PanelWindow {
     id: window
-    title: "Local AI"
-    color: root.background
-    implicitWidth: 960
-    implicitHeight: 680
-    minimumSize: Qt.size(760, 520)
-    onVisibleChanged: if (!visible && !root.closingFromHost) root.dismiss()
+    visible: root.opened
+    anchors { top: true; bottom: true; left: true; right: true }
+    color: "transparent"
+    WlrLayershell.namespace: "omarchy-local-ai"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    exclusionMode: ExclusionMode.Ignore
 
-    PanelKeyCatcher {
-      id: keys
-      anchors.fill: parent
-      onMoveRequested: function(dx, dy) { if (dy) root.choose(root.selectedIndex + dy) }
-      onActivateRequested: root.primary()
-      onCloseRequested: root.dismiss()
+    Rectangle { anchors.fill: parent; color: Util.alpha(root.background, 0.28) }
+    MouseArea { anchors.fill: parent; onClicked: root.dismiss() }
 
-      Column {
+    BorderSurface {
+      id: card
+      width: Math.min(Style.space(960), window.width - Style.space(48))
+      height: Math.min(Style.space(680), window.height - Style.space(72))
+      anchors.centerIn: parent
+      color: Util.alpha(root.background, 0.97)
+      radius: Style.cornerRadius
+      borderSpec: Border.surfaceSpec("popups", "border", Color.popups.border, Math.max(1, Style.spaceReal(1)))
+      MouseArea { anchors.fill: parent; onClicked: {} }
+
+      PanelKeyCatcher {
+        id: keys
         anchors.fill: parent
-        anchors.margins: Style.space(24)
-        spacing: Style.space(16)
+        onMoveRequested: function(dx, dy) { if (dy) root.choose(root.selectedIndex + dy) }
+        onActivateRequested: root.primary()
+        onCloseRequested: root.dismiss()
 
-        Row {
-          width: parent.width
+        Column {
+          anchors.fill: parent
+          anchors.margins: Style.space(24)
+          spacing: Style.space(16)
+
+          Row {
+            width: parent.width; spacing: Style.space(16)
           Column {
-            width: parent.width - headerActions.implicitWidth
+            width: parent.width - headerActions.implicitWidth - parent.spacing
             Text { text: "Local AI"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.iconLarge; font.weight: Font.Medium }
-            Meta { text: root.errorText || root.busy || root.notice || (root.status.ready ? root.status.model + " · " + root.status.acceleratorCount + " × " + root.status.hardware + " · " + root.vram() + " · API + " + (root.status.tools ? "tools ready" : "chat only") : root.status.running ? "Model loading" : "Nothing running") }
+            Meta { width: parent.width; text: root.errorText || root.busy || root.notice || (root.status.ready ? root.status.model + " · " + root.status.acceleratorCount + " × " + root.status.hardware + " · " + root.vram() + " · API + " + (root.status.tools ? "tools ready" : "chat only") : root.status.running ? "Model loading" : "Nothing running") }
           }
           Row {
             id: headerActions; spacing: Style.space(16)
@@ -100,11 +115,12 @@ Item {
         }
         Rule {}
 
-        Row {
+          Row {
           width: parent.width
-          height: parent.height - y - selectedBar.height
+          height: parent.height - y - selectedBar.height - parent.spacing
           spacing: Style.space(18)
           Column {
+            id: hardwareColumn
             width: Style.space(210); spacing: Style.space(12)
             Label { text: "HARDWARE" }
             Repeater {
@@ -129,9 +145,9 @@ Item {
             }
             Meta { width: parent.width; text: root.status.ready ? "using " + root.status.model : "load a model first"; elide: Text.ElideRight }
           }
-          Rule { width: Math.max(1, Style.spaceReal(1)); height: parent.height }
+          Rule { id: divider; width: Math.max(1, Style.spaceReal(1)); height: parent.height }
           Column {
-            width: parent.width - Style.space(230); height: parent.height; spacing: Style.space(8)
+            width: parent.width - hardwareColumn.width - divider.width - parent.spacing * 2; height: parent.height; spacing: Style.space(8)
             Label { text: "RECIPES · SORTED BY GPU COUNT" }
             ListView {
               id: recipeList
@@ -140,12 +156,14 @@ Item {
                 required property var modelData; required property int index
                 width: recipeList.width; height: Style.space(42); hasCursor: index === root.selectedIndex; current: Boolean(modelData.active)
                 Row {
+                  id: recipeCells
                   anchors.fill: parent; anchors.leftMargin: Style.space(8); anchors.rightMargin: Style.space(8); spacing: Style.space(8)
-                  Cell { width: parent.width * 0.31; text: modelData.name; color: index === root.selectedIndex ? root.foreground : root.dim }
-                  Cell { width: parent.width * 0.21; text: modelData.engine + " · " + modelData.precision }
-                  Cell { width: parent.width * 0.20; text: modelData.hardware.indexOf("Intel") >= 0 ? "Arc Pro B70" : "RTX 3090" }
-                  Cell { width: parent.width * 0.11; text: modelData.acceleratorCount + " GPU" + (modelData.acceleratorCount === 1 ? "" : "s") }
-                  Cell { width: parent.width * 0.13; text: root.modelState(modelData) }
+                  readonly property real usableWidth: width - spacing * 4
+                  Cell { width: recipeCells.usableWidth * 0.30; text: modelData.name; color: index === root.selectedIndex ? root.foreground : root.dim }
+                  Cell { width: recipeCells.usableWidth * 0.22; text: modelData.engine + " · " + modelData.precision }
+                  Cell { width: recipeCells.usableWidth * 0.20; text: modelData.hardware.indexOf("Intel") >= 0 ? "Arc Pro B70" : "RTX 3090" }
+                  Cell { width: recipeCells.usableWidth * 0.12; text: modelData.acceleratorCount + " GPU" + (modelData.acceleratorCount === 1 ? "" : "s") }
+                  Cell { width: recipeCells.usableWidth * 0.16; text: root.modelState(modelData) }
                 }
                 MouseArea { anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onEntered: root.choose(index); onClicked: root.choose(index); onDoubleClicked: root.primary() }
               }
@@ -162,11 +180,12 @@ Item {
           Rectangle { visible: root.busy === "Downloading"; anchors.left: parent.left; anchors.right: primaryAction.left; anchors.bottom: parent.bottom; anchors.bottomMargin: Style.space(7); height: Math.max(2, Style.spaceReal(2)); color: Util.alpha(root.foreground, 0.16); Rectangle { width: Math.min(parent.width, Math.max(Style.space(8), parent.width * root.downloadProgress)); height: parent.height; color: root.foreground } }
           Link { id: primaryAction; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; enabled: Boolean(root.selected()) && !root.busy; text: root.busy === "Downloading" ? Math.round(root.downloadProgress * 100) + "%" : !root.selected() ? "" : !root.selected().downloaded ? "Download" : root.status.running ? "Switch" : "Run"; onTriggered: root.primary() }
         }
+        }
       }
     }
   }
 
-  component Meta: Text { color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+  component Meta: Text { color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight; maximumLineCount: 1 }
   component Label: Text { color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.letterSpacing: Style.spaceReal(0.4) }
   component Cell: Text { anchors.verticalCenter: parent.verticalCenter; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight }
   component Link: Text {
