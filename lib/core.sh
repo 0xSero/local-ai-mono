@@ -117,7 +117,7 @@ resolved_recipe() {
         ipc:($r.launch.ipc // null),sharedMemory:($r.launch.shm_size // null),environment:($r.launch.environment // {}),
         arguments:($r.launch.arguments // []),mounts:($r.launch.mounts // []),devices:($r.launch.devices // []),
         capAdd:($r.launch.cap_add // []),securityOpt:($r.launch.security_opt // [])},
-      serving:{configuredMaxContextTokens:$r.serving.max_context_tokens,tensorParallel:$r.serving.tensor_parallel},
+      serving:{configuredMaxContextTokens:(($r.serving.max_context_tokens // ($r|arg("--max-model-len")) // 32768)|tonumber),tensorParallel:$r.serving.tensor_parallel},
       capabilities:$r.capabilities,localProduct:$g.product,localCount:$g.count,
       compatible:($g.count >= $r.hardware_count),
       ready:($g.count >= $r.hardware_count and ([ $g.devices[] | select(.freeMiB >= (($h.memory.vram_gb*1024)*0.88)) ] | length) >= $r.hardware_count),

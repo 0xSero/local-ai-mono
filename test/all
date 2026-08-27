@@ -25,7 +25,7 @@ assert() { "$@" || { printf 'not ok - %s\n' "$*" >&2; exit 1; }; }
 
 assert registry_valid; ok 'canonical registry index validates'
 snapshot=$(registry_snapshot_json)
-assert jq -e '.schemaVersion=="local-ai-registry/v1" and .registry.recipeCount==1 and .models[0].name=="Small Registry Model" and .models[0].registrySpeed==42.5 and .hardware.groups[0].registryId=="rtx-3090-24gb"' >/dev/null <<<"$snapshot"
+assert jq -e '.schemaVersion=="local-ai-registry/v1" and .registry.recipeCount==1 and .models[0].name=="Small Registry Model" and .models[0].registrySpeed==42.5 and .recipes[0].serving.configuredMaxContextTokens==8192 and .hardware.groups[0].registryId=="rtx-3090-24gb"' >/dev/null <<<"$snapshot"
 ok 'hardware and model names come only from referenced registry records'
 
 jq '.id="large-3090" | .hardware_count=4' "$OMARCHY_AI_REGISTRY/recipe/small-3090.json" >"$OMARCHY_AI_REGISTRY/recipe/large-3090.json"
