@@ -54,6 +54,11 @@ downloads=$(downloads_json)
 assert jq -e 'length==1 and .[0].model=="small" and .[0].localBytes==0 and .[0].modelDownloaded==false' >/dev/null <<<"$downloads"
 dd if=/dev/zero of="$OMARCHY_AI_CACHE/models/small-3090/weights.bin" bs=91 count=1 status=none
 assert jq -e '.[0].modelDownloaded==true' >/dev/null <<<"$(downloads_json)"
+rm -rf "$OMARCHY_AI_CACHE/models/small-3090"; mkdir -p "$OMARCHY_AI_CACHE/huggingface/hub/models--org--small"
+dd if=/dev/zero of="$OMARCHY_AI_CACHE/huggingface/hub/models--org--small/weights.bin" bs=91 count=1 status=none
+assert jq -e '.[0].modelDownloaded==true' >/dev/null <<<"$(downloads_json)"
+touch "$OMARCHY_AI_CACHE/huggingface/hub/models--org--small/weights.incomplete"
+assert jq -e '.[0].modelDownloaded==false' >/dev/null <<<"$(downloads_json)"
 ok 'download state is valid JSON for every compatible recipe'
 
 wire_agents "$recipe"
