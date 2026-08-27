@@ -110,6 +110,7 @@ assert grep -q 'recipes found' "$ROOT/Dashboard.qml"
 assert grep -q 'Math.round(root.downloadProgress \* 100) + "%"' "$ROOT"/*.qml
 assert grep -q 'parent.width \* root.downloadProgress' "$ROOT/Dashboard.qml"
 assert grep -q 'visible: root.activeHardware(modelData); width: parent.width' "$ROOT/Dashboard.qml"
+assert grep -q 'PanelWindow {' "$ROOT/Dashboard.qml"; assert grep -q 'usableWidth: width - spacing \* 4' "$ROOT/Dashboard.qml"; assert grep -q 'maximumLineCount: 1' "$ROOT"/*.qml
 assert grep -q 'return m.downloaded ? "downloaded" : m.ready ? "download" : "hardware busy"' "$ROOT/Dashboard.qml"
 assert grep -q 'GPUs detected' "$ROOT"/*.qml; assert grep -q 'GPU options' "$ROOT"/*.qml
 for label in 'Scan' 'Download' 'Run' 'Unload' 'OPEN AGENT' 'Switch' 'Pi' 'OMP' 'Claude'; do assert grep -q "$label" "$ROOT"/*.qml; done
