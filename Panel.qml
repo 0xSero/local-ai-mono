@@ -119,7 +119,7 @@ Panel {
     bar: root.bar
     text: "AI"
     fontSize: Style.font.caption
-    dimmed: !root.status.ready
+    dimmed: root.status.ready !== true
     tooltipText: root.status.ready ? "Local AI · " + root.status.model : "Local AI"
     onPressed: root.toggle()
   }
@@ -189,7 +189,7 @@ Panel {
           spacing: Style.space(11)
           visible: root.busy === "" && root.page === "home"
 
-          ActionLink { text: "Open agent"; enabled: root.status.ready; onTriggered: root.openAgent() }
+          ActionLink { text: "Open agent"; enabled: root.status.ready === true; onTriggered: root.openAgent() }
           ActionLink { text: "Change model"; onTriggered: root.showModels() }
           ActionLink { text: "Unload"; visible: Boolean(root.status.recipeId); onTriggered: root.runAction("Unloading", ["unload"], "home") }
           ActionLink { text: "Scan"; onTriggered: root.runAction("Scanning", ["scan"], "models") }
@@ -222,7 +222,7 @@ Panel {
                 }
                 Text {
                   id: modelState
-                  text: modelData.active ? root.status.state : modelData.downloaded ? "downloaded" : "download"
+                  text: modelData.active ? String(root.status.state || "stopped") : modelData.downloaded ? "downloaded" : "download"
                   color: root.dim
                   font.family: root.bar.fontFamily
                   font.pixelSize: Style.font.caption
@@ -249,13 +249,13 @@ Panel {
           visible: root.busy === "" && root.page === "model"
 
           ActionLink {
-            visible: root.selectedModel() && (!root.selectedModel().active || !root.status.running)
-            enabled: root.selectedModel() && (!root.selectedModel().downloaded || root.selectedModel().ready || root.status.running)
+            visible: Boolean(root.selectedModel()) && (!root.selectedModel().active || !root.status.running)
+            enabled: Boolean(root.selectedModel()) && (!root.selectedModel().downloaded || root.selectedModel().ready || root.status.running)
             text: root.selectedModel() && !root.selectedModel().downloaded ? "Download"
               : root.status.running ? "Switch running model" : "Run"
             onTriggered: root.primary()
           }
-          ActionLink { text: "Open agent"; visible: root.selectedModel() && root.selectedModel().active && root.status.ready; onTriggered: root.openAgent() }
+          ActionLink { text: "Open agent"; visible: Boolean(root.selectedModel()) && root.selectedModel().active && root.status.ready === true; onTriggered: root.openAgent() }
           ActionLink { text: "Back"; onTriggered: root.page = "models" }
         }
       }
