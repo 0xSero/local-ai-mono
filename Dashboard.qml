@@ -87,7 +87,7 @@ Item {
         Row {
           width: parent.width; spacing: Style.space(36)
           Repeater {
-            model: [{value:root.gpuCount,label:"GPUs detected"},{value:root.models.length,label:"compatible recipes"},{value:root.gpuOptions,label:"GPU options"},{value:root.downloadedCount,label:"downloaded"}]
+            model: [{value:root.gpuCount,label:"GPUs detected"},{value:root.models.length,label:"recipes found"},{value:root.gpuOptions,label:"GPU options"},{value:root.downloadedCount,label:"downloaded"}]
             Column {
               required property var modelData; width: (parent.width - parent.spacing * 3) / 4; spacing: Style.space(2)
               Text { text: modelData.value; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.heading }

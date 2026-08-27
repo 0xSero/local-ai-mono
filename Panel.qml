@@ -9,6 +9,8 @@ Panel {
   moduleName: "sero.local-ai"
   ipcTarget: "sero.local-ai"
   manageIpc: false
+  implicitWidth: button.implicitWidth
+  implicitHeight: button.implicitHeight
 
   property var data: ({ status: { state: "loading" }, models: [] })
   property string errorText: ""
@@ -76,7 +78,7 @@ Panel {
           width: parent.width; spacing: Style.space(3)
           Meta { text: root.gpuCount + " GPUs detected"; color: root.foreground }
           Repeater { model: root.groups; Meta { required property var modelData; width: content.width; text: modelData.count + " × " + (modelData.registryName || modelData.product); elide: Text.ElideRight } }
-          Meta { text: root.recipeCount + " compatible recipes" }
+          Meta { text: root.recipeCount + " matching recipes" }
         }
         Column {
           width: parent.width; spacing: Style.space(11)

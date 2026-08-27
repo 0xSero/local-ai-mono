@@ -104,6 +104,9 @@ assert jq -e '.id=="sero.local-ai" and (.kinds|index("bar-widget")) and (.kinds|
 if grep -Eq 'Qwen|Gemma|LFM|Ornith|#[0-9A-Fa-f]{6}' "$ROOT"/*.qml; then printf 'not ok - panel embeds catalog data or fixed colors\n' >&2; exit 1; fi
 assert grep -q 'BarIconButton {' "$ROOT/Panel.qml"
 assert grep -q 'radius: width / 2' "$ROOT/Panel.qml"
+assert grep -q 'implicitWidth: button.implicitWidth' "$ROOT/Panel.qml"
+assert grep -q 'matching recipes' "$ROOT/Panel.qml"
+assert grep -q 'recipes found' "$ROOT/Dashboard.qml"
 assert grep -q 'Math.round(root.downloadProgress \* 100) + "%"' "$ROOT"/*.qml
 assert grep -q 'GPUs detected' "$ROOT"/*.qml; assert grep -q 'GPU options' "$ROOT"/*.qml
 for label in 'Scan' 'Download' 'Run' 'Unload' 'Open agent' 'Switch'; do assert grep -q "$label" "$ROOT"/*.qml; done
