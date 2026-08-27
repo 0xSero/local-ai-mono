@@ -9,6 +9,8 @@ import { getEntityDetail, listModelInstances, modelInstanceResult, getModelInsta
 export const dynamic = "force-dynamic"
 
 const COLLECTION_LABELS: Record<string, string> = {
+  benchmarks: "Benchmark",
+  "benchmark-runs": "Benchmark run",
   hardware: "Hardware",
   "model-instances": "Model instance",
   models: "Model",

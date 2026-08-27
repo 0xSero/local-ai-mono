@@ -12,9 +12,9 @@ import {
   type CompatibilityResult,
   type ModelInstanceResult,
 } from "@local-ai/registry"
-import type { Hardware, Model, PriceObservation, PriceRecord, SpeedRow, SpeedSweep } from "@local-ai/registry/schema"
+import type { Benchmark, BenchmarkRun, Hardware, Model, PriceObservation, PriceRecord, SpeedRow, SpeedSweep } from "@local-ai/registry/schema"
 
-type RecordTopic = "recipes" | "hardware" | "models" | "prices" | "speed-sweeps"
+type RecordTopic = "recipes" | "hardware" | "models" | "benchmarks" | "benchmark-runs" | "prices" | "speed-sweeps"
 
 type RecordLink = {
   api?: string
@@ -112,7 +112,7 @@ function Summary({ action, description, facts, label }: { action?: ReactNode; de
 }
 
 function relationHref(link: RecordLink): string {
-  const match = link.href?.match(/^\/(recipes|hardware|models|prices|speed-sweeps)\/([^/]+)$/)
+  const match = link.href?.match(/^\/(recipes|hardware|models|benchmarks|benchmark-runs|prices|speed-sweeps)\/([^/]+)$/)
   if (!match) return link.href ?? link.api ?? "#"
   return `/?topic=${match[1]}&record=${encodeURIComponent(match[2])}`
 }
@@ -144,6 +144,8 @@ function relationMeta(link: RecordLink): string {
 function relationshipLabel(key: string): string {
   const labels: Record<string, string> = {
     hardware: "Hardware",
+    benchmark: "Benchmark",
+    benchmark_runs: "Benchmark scores",
     model: "Model",
     model_instance: "Model instance",
     model_instances: "Model instances",
@@ -154,6 +156,49 @@ function relationshipLabel(key: string): string {
     speed_sweeps: "Speed evidence",
   }
   return labels[key] ?? humanize(key)
+}
+
+function BenchmarkDetails({ record }: { record: Record<string, unknown> }) {
+  const benchmark = record as unknown as Benchmark & { relationships?: Relationships }
+  return (
+    <>
+      <Summary
+        action={<CopyButton label="Copy command" value={benchmark.command} />}
+        description={benchmark.description}
+        facts={[
+          { label: "Coverage", value: `${benchmark.coverage.model_count.toLocaleString()} models`, detail: `${benchmark.coverage.benchmark_run_count.toLocaleString()} instance records` },
+          { label: "Evidence", value: `${benchmark.coverage.direct_run_count.toLocaleString()} direct`, detail: `${benchmark.coverage.inherited_run_count.toLocaleString()} inherited` },
+          { label: "Runner", value: humanize(benchmark.runner.status), detail: benchmark.runner.framework },
+          { label: "Metric", value: benchmark.metric.name, detail: benchmark.metric.unit },
+        ]}
+        label="BENCHMARK"
+      />
+      <Connections relationships={benchmark.relationships} />
+    </>
+  )
+}
+
+function BenchmarkRunDetails({ record }: { record: Record<string, unknown> }) {
+  const run = record as unknown as BenchmarkRun & { relationships?: Relationships }
+  const inherited = run.inherited_from
+  return (
+    <>
+      <Summary
+        action={<a href={run.source.url} rel="noreferrer" target="_blank">Open source ↗</a>}
+        description={run.score_origin === "direct"
+          ? "This score is reported by the exact model-instance repository."
+          : "This score is inherited from the canonical model and is not evidence that this exact artifact was evaluated."}
+        facts={[
+          { label: "Score", value: run.score.value.toLocaleString(), detail: `${run.score.metric} · ${run.score.unit}` },
+          { label: "Origin", value: humanize(run.score_origin), detail: inherited?.source_model_repository ?? run.source.reported_model },
+          { label: "Protocol", value: run.protocol.name, detail: run.protocol.details ?? "Details unavailable" },
+          { label: "Captured", value: formatDate(run.source.captured_at), detail: run.source.kind },
+        ]}
+        label="BENCHMARK SCORE"
+      />
+      <Connections relationships={run.relationships} />
+    </>
+  )
 }
 
 function relationshipEntries(relationships: unknown): Array<[string, RecordLink[]]> {
@@ -380,6 +425,8 @@ export function RecordDetails({ compatibility, modelInstances, record, selectedH
     <>
       {topic === "hardware" && <HardwareDetails record={record} />}
       {topic === "models" && <ModelDetails modelInstances={modelInstances} record={record} />}
+      {topic === "benchmarks" && <BenchmarkDetails record={record} />}
+      {topic === "benchmark-runs" && <BenchmarkRunDetails record={record} />}
       {topic === "prices" && <PriceDetails record={record} />}
       {topic === "speed-sweeps" && <SpeedDetails record={record} />}
       {topic === "recipes" && compatibility && (

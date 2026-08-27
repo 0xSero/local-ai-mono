@@ -1,4 +1,4 @@
-export type RegistryCollection = "hardware" | "model-instances" | "models" | "prices" | "recipes" | "speed-sweeps"
+export type RegistryCollection = "benchmark-runs" | "benchmarks" | "hardware" | "model-instances" | "models" | "prices" | "recipes" | "speed-sweeps"
 
 export type RegistryList<T> = {
   data: T[]
