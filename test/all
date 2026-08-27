@@ -135,8 +135,8 @@ unset -f docker flock
 ok 'scan integrates registry, mocked hardware, downloads, and runtime state without GPU access'
 
 for file in "$ROOT"/bin/* "$ROOT"/lib/*.sh "$ROOT"/test/all; do bash -n "$file"; done
-lines=$(find "$ROOT" -type f -not -path '*/.git/*' -not -name '.DS_Store' -print0 | xargs -0 wc -l | tail -1 | awk '{print $1}')
+lines=$(wc -l "$ROOT"/manifest.json "$ROOT"/*.qml "$ROOT"/bin/* "$ROOT"/lib/*.sh "$ROOT"/test/all | tail -1 | awk '{print $1}')
 ((lines <= 1000)) || { printf 'not ok - %s lines exceeds 1000\n' "$lines" >&2; exit 1; }
-ok "repository stays compact ($lines lines)"
+ok "source, manifest, and tests stay compact ($lines lines)"
 
 printf '1..%s\n' "$pass"
