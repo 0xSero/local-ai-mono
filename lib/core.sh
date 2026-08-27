@@ -12,6 +12,7 @@ AI_CONTAINER="${OMARCHY_AI_CONTAINER:-omarchy-local-ai}"
 AI_PORT="${OMARCHY_AI_PORT:-12434}"
 AI_ACTIVE="$AI_STATE/active.json"
 AI_BENCHMARK="$AI_STATE/benchmark.json"
+AI_CLAUDE_UNIT="omarchy-local-ai-claude.service"
 
 fail() { printf 'local-ai: %s\n' "$*" >&2; return 1; }
 notify() { true; }
@@ -309,6 +310,28 @@ wire_agents() {
   omp_yaml set "$model" "$(jq 'del(.apiKey) + {auth:"none"}' <<<"$provider")"
 }
 
+harness_bin() { [[ -x $AI_USER_HOME/.local/bin/$1 ]] && printf '%s\n' "$AI_USER_HOME/.local/bin/$1" || command -v "$1"; }
+
+claude_bridge() {
+  local model config uvx deadline
+  model=$(served_model); uvx=$(harness_bin uvx) || fail "uvx is required for Claude Code"
+  mkdir -p "$AI_STATE"; config="$AI_STATE/claude-litellm.json"
+  jq -n --arg model "$model" --arg url "http://127.0.0.1:$AI_PORT/v1" '{model_list:[{model_name:"omarchy-local",litellm_params:{model:("openai/"+$model),api_base:$url,api_key:"local"}}]}' >"$config"
+  systemctl --user stop "$AI_CLAUDE_UNIT" >/dev/null 2>&1 || true
+  systemd-run --user --unit="${AI_CLAUDE_UNIT%.service}" --collect --property=Restart=on-failure "$uvx" --from 'litellm[proxy]' litellm --config "$config" --host 127.0.0.1 --port 12435 >/dev/null
+  deadline=$((SECONDS+120)); until curl -fsS http://127.0.0.1:12435/health/liveliness >/dev/null 2>&1; do ((SECONDS<deadline)) || fail "Claude bridge did not become ready"; sleep 1; done
+}
+
+open_harness() {
+  local name=${1:-} bin
+  [[ $(jq -r .ready <<<"$(status_json)") == true ]] || fail "load a model first"
+  case $name in
+    pi|omp) bin=$(harness_bin "$name") || fail "$name is not installed"; [[ $name == omp ]] && exec omarchy-launch-tui --app-id=org.omarchy.agent "$bin" --auto-approve || exec omarchy-launch-tui --app-id=org.omarchy.agent "$bin" ;;
+    claude) bin=$(harness_bin claude) || fail "Claude Code is not installed"; claude_bridge; exec omarchy-launch-tui --app-id=org.omarchy.agent env ANTHROPIC_BASE_URL=http://127.0.0.1:12435 ANTHROPIC_AUTH_TOKEN=local ANTHROPIC_MODEL=omarchy-local ANTHROPIC_SMALL_FAST_MODEL=omarchy-local CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 "$bin" --model omarchy-local ;;
+    *) fail "choose pi, omp, or claude" ;;
+  esac
+}
+
 record_usage() {
   local recipe=$1 response=$2 dir="$AI_USER_HOME/.local/state/omarchy/agents/usage" file day tmp old='{}'
   day=$(date +%F); mkdir -p "$dir"; file="$dir/local-ai.json"; [[ -f $file ]] && old=$(<"$file"); tmp=$(mktemp "$dir/.local-ai.XXXXXX")
@@ -417,6 +440,7 @@ unwire_agents() {
 }
 
 unload_model() {
+  systemctl --user stop "$AI_CLAUDE_UNIT" >/dev/null 2>&1 || true
   docker rm -f "$AI_CONTAINER" >/dev/null 2>&1 || true
   rm -f "$AI_ACTIVE" "$AI_USER_HOME/.local/state/omarchy/agents/usage/local-ai.json"
   unwire_agents; notify; echo 'unloaded · downloads kept'

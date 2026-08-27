@@ -37,7 +37,8 @@ Item {
   function selected() { return models.length ? models[selectedIndex] : null }
   function runAction(label, args) { if (busy || action.running) return; busy = label; errorText = ""; action.command = [cli].concat(args); action.running = true }
   function primary() { var m = selected(); if (!m) return; if (!m.downloaded) runAction("Downloading", ["download", m.recipeId]); else if (status.running) runAction("Switching", ["switch", m.recipeId]); else runAction("Loading", ["run", m.recipeId]) }
-  function openAgent() { Quickshell.execDetached(["omarchy-agent", "--pick"]) }
+  function openAgent(name) { Quickshell.execDetached([cli, "open-agent", name]) }
+  function modelState(m) { if (m.active) return "running"; if (busy === "Downloading" && selected() && selected().recipeId === m.recipeId) return "downloading"; return m.downloaded ? "downloaded" : m.ready ? "download" : "hardware busy" }
 
   Process { id: snapshot; command: [root.cli, "snapshot"]; stdout: StdioCollector { waitForEnd: true; onStreamFinished: { try { root.data = JSON.parse(text); root.errorText = ""; root.choose(root.selectedIndex) } catch (e) { root.errorText = "Registry unavailable" } } } }
   Process {
@@ -78,7 +79,6 @@ Item {
           Row {
             id: headerActions; spacing: Style.space(16)
             Link { text: "Refresh"; onTriggered: root.refresh() }
-            Link { text: "Open agent"; enabled: Boolean(root.status.ready); onTriggered: root.openAgent() }
             Link { text: "Unload"; enabled: Boolean(root.status.running); onTriggered: root.runAction("Unloading", ["unload"]) }
           }
         }
@@ -115,6 +115,14 @@ Item {
             Label { text: "REGISTRY"; topPadding: Style.space(8) }
             Meta { width: parent.width; text: (root.data.registry ? root.data.registry.recipeCount : 0) + " matching of " + (root.data.registry ? root.data.registry.totalRecipeCount : 0); wrapMode: Text.WordWrap }
             Link { text: "Scan registry"; onTriggered: root.runAction("Scanning", ["scan"]) }
+            Label { text: "OPEN AGENT"; topPadding: Style.space(8) }
+            Row {
+              spacing: Style.space(12)
+              Link { text: "Pi"; enabled: Boolean(root.status.ready); onTriggered: root.openAgent("pi") }
+              Link { text: "OMP"; enabled: Boolean(root.status.ready); onTriggered: root.openAgent("omp") }
+              Link { text: "Claude"; enabled: Boolean(root.status.ready); onTriggered: root.openAgent("claude") }
+            }
+            Meta { width: parent.width; text: root.status.ready ? "using " + root.status.model : "load a model first"; elide: Text.ElideRight }
           }
           Rule { width: Math.max(1, Style.spaceReal(1)); height: parent.height }
           Column {
@@ -132,7 +140,7 @@ Item {
                   Cell { width: parent.width * 0.21; text: modelData.engine + " · " + modelData.precision }
                   Cell { width: parent.width * 0.20; text: modelData.hardware.indexOf("Intel") >= 0 ? "Arc Pro B70" : "RTX 3090" }
                   Cell { width: parent.width * 0.11; text: modelData.acceleratorCount + " GPU" + (modelData.acceleratorCount === 1 ? "" : "s") }
-                  Cell { width: parent.width * 0.13; text: modelData.downloaded ? "downloaded" : modelData.ready ? "available" : "busy" }
+                  Cell { width: parent.width * 0.13; text: root.modelState(modelData) }
                 }
                 MouseArea { anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onEntered: root.choose(index); onClicked: root.choose(index); onDoubleClicked: root.primary() }
               }
@@ -143,9 +151,10 @@ Item {
 
         Item {
           id: selectedBar
-          width: parent.width; height: Style.space(44)
+          width: parent.width; height: Style.space(48)
           Rule { width: parent.width; anchors.top: parent.top }
-          Meta { anchors.left: parent.left; anchors.right: primaryAction.left; anchors.rightMargin: Style.space(18); anchors.verticalCenter: parent.verticalCenter; text: root.selected() ? root.selected().name + " · " + root.selected().acceleratorCount + " GPU" + (root.selected().acceleratorCount === 1 ? "" : "s") + " · " + root.selected().hardware : "No matching recipe"; elide: Text.ElideRight }
+          Meta { anchors.left: parent.left; anchors.right: primaryAction.left; anchors.rightMargin: Style.space(18); anchors.top: parent.top; anchors.topMargin: Style.space(12); text: root.selected() ? root.selected().name + " · " + root.selected().acceleratorCount + " GPU" + (root.selected().acceleratorCount === 1 ? "" : "s") + " · " + root.selected().hardware : "No matching recipe"; elide: Text.ElideRight }
+          Rectangle { visible: root.busy === "Downloading"; anchors.left: parent.left; anchors.right: primaryAction.left; anchors.bottom: parent.bottom; anchors.bottomMargin: Style.space(7); height: Math.max(2, Style.spaceReal(2)); color: Util.alpha(root.foreground, 0.16); Rectangle { width: Math.min(parent.width, Math.max(Style.space(8), parent.width * root.downloadProgress)); height: parent.height; color: root.foreground } }
           Link { id: primaryAction; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; enabled: Boolean(root.selected()) && !root.busy; text: root.busy === "Downloading" ? Math.round(root.downloadProgress * 100) + "%" : !root.selected() ? "" : !root.selected().downloaded ? "Download" : root.status.running ? "Switch" : "Run"; onTriggered: root.primary() }
         }
       }

@@ -19,7 +19,7 @@ omarchy plugin enable sero.local-ai
 ./bin/omarchy-local-ai download <model-or-recipe>
 ./bin/omarchy-local-ai run <model-or-recipe>
 ./bin/omarchy-local-ai unload
-./bin/omarchy-local-ai open-agent
+./bin/omarchy-local-ai open-agent pi # or omp / claude
 ./bin/omarchy-local-ai switch <model-or-recipe>
 ```
 Diagnostic commands remain available for measured acceptance, not as extra UI.
@@ -27,6 +27,7 @@ Diagnostic commands remain available for measured acceptance, not as extra UI.
 - The registry is the only source; only validated, immutable Docker recipes run.
 - CUDA graphs stay enabled; eager and graph-disabling flags are rejected.
 - Serving binds to `127.0.0.1`; downloads never launch inference.
-- Run and switch require a download; OMP and Pi wiring is atomic and reversible.
+- Run and switch require a download; Pi and OMP use the endpoint directly.
+- Claude starts a loopback-only LiteLLM bridge on demand; unload stops it.
 - A failed switch restores the previous managed container.
 Run `./test/all`. The complete repository, tests and docs included, stays under 1,000 lines.

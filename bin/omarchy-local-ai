@@ -14,7 +14,7 @@ usage() {
   download <model>       download one registry model
   run <model>            load one downloaded model
   unload                 free hardware; keep downloads
-  open-agent             open the Omarchy agent picker
+  open-agent <harness>   open Pi, OMP, or Claude on the running model
   switch <model>         atomically replace the running model'
 }
 
@@ -37,7 +37,7 @@ case "$command" in
     ;;
   switch) [[ -n ${1:-} ]] || fail 'choose a model'; run_recipe "$1" ;;
   unload) unload_model ;;
-  open-agent) exec omarchy-agent --pick ;;
+  open-agent) open_harness "${1:-}" ;;
   status)
     data=$(status_json)
     if [[ ${1:-} == --json ]]; then jq . <<<"$data"; else jq -r '"\(.state)" + (if .model then " · \(.model) · 127.0.0.1:\(.port)" else "" end)' <<<"$data"; fi
