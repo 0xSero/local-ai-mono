@@ -1,2 +1,10 @@
 *.tmp
 .DS_Store
+.env
+.env.*
+!.env.example
+.next/
+.vercel/
+__pycache__/
+node_modules/
+*.tsbuildinfo
