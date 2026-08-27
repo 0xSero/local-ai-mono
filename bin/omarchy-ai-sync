@@ -1,9 +1,0 @@
-#!/bin/bash
-
-# omarchy:summary=Refresh recipes from one validated registry JSON URL
-# omarchy:group=ai
-
-set -euo pipefail
-source "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/local-ai.sh"
-registry_sync
-local_ai_notify_shell

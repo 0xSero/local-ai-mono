@@ -1,10 +1,69 @@
 #!/bin/bash
-# Run every module suite. Each is independent and sandboxed.
-set -uo pipefail
-cd -- "$(dirname -- "${BASH_SOURCE[0]}")" || exit 1
-status=0
-for suite in hardware registry models engine plugin; do
-  echo "── $suite"
-  bash "./$suite-test.sh" || status=1
-done
-exit $status
+
+set -euo pipefail
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+export HOME="$TMP/home" OMARCHY_AI_STATE="$TMP/state" OMARCHY_AI_CACHE="$TMP/cache"
+export OMARCHY_AI_HARDWARE_JSON='{"groups":[{"backend":"nvidia","product":"NVIDIA GeForce RTX 3090","count":4,"memoryBytesEach":25769803776,"devices":[{"index":0,"totalMiB":24576,"freeMiB":24576},{"index":1,"totalMiB":24576,"freeMiB":24576},{"index":2,"totalMiB":24576,"freeMiB":24576},{"index":3,"totalMiB":24576,"freeMiB":24576}]}],"dockerReady":true,"diskFreeBytes":999999999999}'
+mkdir -p "$OMARCHY_AI_STATE"
+
+digest=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+revision=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+jq -n --arg digest "$digest" --arg revision "$revision" '{
+  schemaVersion:"omarchy-local-ai/v1",
+  hardware:[
+    {id:"nvidia.rtx-3090.24gb.x1.pcie",acceleratorBackend:"nvidia",acceleratorCount:1,memoryBytesEach:25769803776,product:"NVIDIA GeForce RTX 3090 24GB"},
+    {id:"nvidia.rtx-pro-6000-blackwell.96gb.x1.pcie",acceleratorBackend:"nvidia",acceleratorCount:1,memoryBytesEach:103079215104,product:"NVIDIA RTX PRO 6000 Blackwell"}
+  ],
+  recipes:[
+    {schemaVersion:"omarchy-local-ai/v1",id:"small-3090",status:"validated",description:"test",
+      compatibility:{acceleratorBackend:"nvidia",acceleratorCount:1,hardwareId:"nvidia.rtx-3090.24gb.x1.pcie",minimumDiskBytes:1,minimumMemoryBytesEach:24000000000},
+      capabilities:{chat:true,reasoning:false,tools:false,vision:false},endpoint:{protocol:"openai/v1",containerPort:30000,modelPath:"/v1/models",completionPath:"/v1/chat/completions"},
+      engine:{name:"sglang",graphMode:"full",version:"test"},model:{id:"small",repository:"org/small",revision:$revision,servedName:"org/small",weightPrecision:"BF16",downloadBytes:100},
+      serving:{configuredMaxContextTokens:8192,tensorParallel:1},launch:{adapter:"docker.openai-v1",image:("image@sha256:"+$digest),entrypoint:"/bin/server",ipc:"host",sharedMemoryBytes:1073741824,environment:{A:"B"},assets:[],modelCache:{containerPath:"/models",repository:"org/small",revision:$revision},arguments:["--model","org/small"]}},
+    {schemaVersion:"omarchy-local-ai/v1",id:"large-pro",status:"validated",description:"other",
+      compatibility:{acceleratorBackend:"nvidia",acceleratorCount:1,hardwareId:"nvidia.rtx-pro-6000-blackwell.96gb.x1.pcie",minimumDiskBytes:1,minimumMemoryBytesEach:96000000000},
+      capabilities:{chat:true,reasoning:false,tools:false,vision:false},endpoint:{protocol:"openai/v1",containerPort:30000,modelPath:"/v1/models",completionPath:"/v1/chat/completions"},
+      engine:{name:"vllm",graphMode:"full",version:"test"},model:{id:"large",repository:"org/large",revision:$revision,servedName:"org/large",weightPrecision:"FP8",downloadBytes:100},
+      serving:{configuredMaxContextTokens:8192,tensorParallel:1},launch:{adapter:"docker.openai-v1",image:("image@sha256:"+$digest),entrypoint:null,ipc:"host",sharedMemoryBytes:0,environment:{},assets:[],modelCache:{containerPath:"/models",repository:"org/large",revision:$revision},arguments:["--model","org/large"]}}
+  ]}' >"$OMARCHY_AI_STATE/catalog.json"
+
+source "$ROOT/lib/core.sh"
+pass=0
+ok() { pass=$((pass+1)); echo "ok $pass - $1"; }
+assert() { "$@" || { echo "not ok - $*" >&2; exit 1; }; }
+
+assert catalog_valid "$AI_CATALOG"; ok 'registry schema and immutable launch data validate'
+bad="$TMP/bad.json"; jq '.recipes[0].launch.arguments += ["--enforce-eager"]' "$AI_CATALOG" >"$bad"
+if catalog_valid "$bad"; then echo 'not ok - eager recipe accepted' >&2; exit 1; fi
+ok 'eager and graph-disabling launches are refused'
+
+snapshot=$(snapshot_json)
+assert test "$(jq '.models|length' <<<"$snapshot")" = 2
+assert test "$(jq -r '.models[]|select(.id=="small")|.compatible' <<<"$snapshot")" = true
+assert test "$(jq -r '.models[]|select(.id=="large")|.compatible' <<<"$snapshot")" = false
+ok 'all model names remain visible while compatibility is honest'
+
+recipe=$(recipe_json small); plan=$(plan_json "$recipe")
+assert jq -e '.argv|index("127.0.0.1:12434:30000") and index("device=0") and index("image@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")' >/dev/null <<<"$plan"
+if jq -r '.argv[]' <<<"$plan" | grep -Eqi 'enforce.eager|disable.*cuda.*graph'; then exit 1; fi
+ok 'plan is loopback-only, pins one GPU, and preserves graph mode'
+
+wire_agents "$recipe"
+assert jq -e '.providers.local.baseUrl=="http://127.0.0.1:12434/v1" and (.providers.local.models[0]|has("maxTokens")|not)' "$HOME/.omp/agent/models.json" >/dev/null
+assert jq -e '.defaultProvider=="local" and .defaultModel=="org/small"' "$HOME/.omp/agent/settings.json" >/dev/null
+unwire_agents
+assert jq -e '(.providers.local==null)' "$HOME/.omp/agent/models.json" >/dev/null
+ok 'OMP and Pi wiring is minimal and reversible'
+
+assert jq -e '.id=="sero.local-ai" and .entryPoints.barWidget=="Panel.qml"' "$ROOT/manifest.json" >/dev/null
+assert grep -q 'manifest.__sourceDir' "$ROOT/Panel.qml"
+if grep -Eq '#[0-9A-Fa-f]{6}' "$ROOT/Panel.qml"; then exit 1; fi
+ok 'plugin is installable and inherits the system theme'
+
+for file in "$ROOT"/bin/* "$ROOT"/lib/*.sh "$ROOT"/test/all; do bash -n "$file"; done
+lines=$(find "$ROOT" -type f -not -path '*/.git/*' -not -name '.DS_Store' -print0 | xargs -0 wc -l | tail -1 | awk '{print $1}')
+((lines <= 1000)) || { echo "not ok - $lines lines exceeds 1000" >&2; exit 1; }
+ok "repository stays compact ($lines lines)"
+
+echo "1..$pass"

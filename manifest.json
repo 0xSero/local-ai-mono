@@ -1,21 +1,19 @@
 {
   "schemaVersion": 1,
   "id": "sero.local-ai",
-  "name": "Local AI for RTX 3090",
-  "version": "0.1.0-alpha.1",
+  "name": "Local AI",
+  "version": "1.0.0",
   "author": "0xSero",
-  "description": "Run pinned local AI recipes on one, two, or four RTX 3090 GPUs",
-  "kinds": [
-    "bar-widget"
-  ],
-  "entryPoints": {
-    "barWidget": "shell/plugins/panels/local-ai/Panel.qml"
-  },
+  "license": "MIT",
+  "description": "Detect hardware, consume the Omarchy model registry, and run one validated local model.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {"barWidget": "Panel.qml"},
   "barWidget": {
     "displayName": "Local AI",
-    "description": "Choose and control a pinned RTX 3090 inference recipe",
-    "category": "System",
-    "allowMultiple": false,
-    "defaultSection": "right"
+    "description": "One minimal, theme-native model lifecycle panel.",
+    "category": "AI",
+    "aliases": ["local-ai", "models", "gpu"],
+    "defaultSection": "right",
+    "allowMultiple": false
   }
 }

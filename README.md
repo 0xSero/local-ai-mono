@@ -1,62 +1,56 @@
 # Omarchy Local AI
 
-An installable Omarchy bar plugin for running two pinned local models on one, two, or four RTX 3090 GPUs.
+A small, native Omarchy plugin that turns the read-only [Local AI registry](https://inference-index-api.vercel.app/v1) into one honest model lifecycle.
 
-The alpha contract is intentionally literal: one JSON recipe equals one tensor-parallel topology. There is no hidden scaling step and no runtime guessing.
+```text
+hardware → registry → model → Docker → real completion → OMP / Pi / Omarchy Agents
+```
 
-| Recipe | Model | GPUs | Context |
-|---|---|---:|---:|
-| `qwen36-tp1` | Qwen3.6-35B-A3B GPTQ INT4 | 1 | 131,072 |
-| `qwen36-tp2` | Qwen3.6-35B-A3B GPTQ INT4 | 2 | 131,072 |
-| `qwen36-tp4` | Qwen3.6-35B-A3B GPTQ INT4 | 4 | 131,072 |
-| `qwen38-tp1` | Qwen3.8-27B AWQ INT4 | 1 | 40,960 |
-| `qwen38-tp2` | Qwen3.8-27B AWQ INT4 | 2 | 131,072 |
-| `qwen38-tp4` | Qwen3.8-27B AWQ INT4 | 4 | 131,072 |
+The registry remains truth. The plugin keeps one validated cache, detects NVIDIA and Intel Arc Pro B70 hardware, shows every registry model, and enables only recipes that match the machine. It never invents launch flags or scales a recipe.
 
-Every recipe pins the serving image by digest and the Hugging Face model revision by commit. CUDA graphs stay enabled and eager mode is never forced.
-
-## Install the private alpha
+## Install
 
 ```bash
-omarchy plugin add git@github.com:0xSero/omarchy-local-ai.git
+omarchy plugin add https://github.com/0xSero/omarchy-local-ai.git --yes
 omarchy plugin enable sero.local-ai
 ```
 
-The bar widget invokes the checkout's own scripts through the source directory Omarchy injects into the plugin manifest. It does not depend on globally installed `omarchy-ai-*` commands.
+The panel resolves its CLI from its own checkout, so no files are copied into `/usr/share/omarchy`.
 
-Open the Local AI widget and choose one of the six recipes. Setup installs Docker and the NVIDIA container toolkit when needed, launches exactly the recipe's GPU count, proves a real chat completion, then wires the local OpenAI-compatible provider into Pi and OMP.
-
-Ori is visible in Omarchy as an agent, but its current CLI does not accept this direct local OpenAI-compatible provider. The plugin does not pretend otherwise: Pi and OMP are wired today; Ori needs upstream custom-provider support before it can be pointed at this endpoint.
-
-## Registry
-
-[`share/registry.json`](share/registry.json) is an independent, pure-data registry. Add or change recipes there without changing the engine, model selection, or UI code.
-
-To consume a separately hosted registry, point sync at one exact JSON document:
+## Use
 
 ```bash
-OMARCHY_AI_REGISTRY_URL=https://example.com/registry.json ./bin/omarchy-ai-sync
+./bin/omarchy-local-ai sync
+./bin/omarchy-local-ai hardware
+./bin/omarchy-local-ai models
+./bin/omarchy-local-ai run
+./bin/omarchy-local-ai status
+./bin/omarchy-local-ai downloads
+./bin/omarchy-local-ai task "Explain this code"
+./bin/omarchy-local-ai benchmark
+./bin/omarchy-local-ai stop
+./bin/omarchy-local-ai start
+./bin/omarchy-local-ai remove
 ```
 
-Sync downloads into a temporary file, validates the six required alpha recipes plus any additional pinned recipes, and atomically replaces the cached catalog. A failed download or invalid registry leaves the last good catalog untouched. Account-wide GitHub repository scanning is deliberately not part of the design.
+`run` performs the complete transaction: select exact hardware, build the registry-declared Docker command, bind the API to loopback, download as needed, wait for `/v1/models`, require a real completion, atomically record state, and wire the model into OMP and Pi. A failed model switch restores the previous managed container.
 
-## Code map
+`downloads` reports image and weight-cache state. `benchmark` records three live runs and reports median output throughput. `task` sends real work and writes token usage into the existing `omarchy.agents` record directory.
 
-```text
-manifest.json   third-party Omarchy plugin contract
-shell/          one self-contained bar widget
-share/          pinned six-recipe registry
-lib/            hardware, registry, model, and engine modules
-bin/            thin plugin-local commands
-test/           sandboxed module and plugin tests
-docs/           architecture and live RTX 3090 acceptance evidence
-```
+## Safety contract
 
-## Validate
+- Only `validated` `docker.openai-v1` recipes run.
+- Images require SHA-256 digests and models require immutable revisions.
+- CUDA graphs remain enabled; eager mode and graph-disabling arguments are rejected.
+- The endpoint binds only to `127.0.0.1`.
+- User agent JSON is validated and updated atomically.
+- Removing the runtime keeps downloaded weights.
+- Registry failures preserve the last good cache.
+
+## Verify
 
 ```bash
 ./test/all
-omarchy plugin validate .
 ```
 
-Live results and the acceptance method are in [`docs/acceptance-3090.md`](docs/acceptance-3090.md).
+The whole repository, including tests and docs, is kept below 1,000 lines.
