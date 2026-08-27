@@ -100,13 +100,13 @@ unwire_agents; ok 'OMP and Pi wiring is minimal and reversible'
 )
 ok 'failed switch restores and restarts the previous managed model'
 
-assert jq -e '.id=="sero.local-ai" and .entryPoints.barWidget=="Panel.qml"' "$ROOT/manifest.json" >/dev/null
-if grep -Eq 'Qwen|Gemma|LFM|Ornith|#[0-9A-Fa-f]{6}' "$ROOT/Panel.qml"; then printf 'not ok - panel embeds catalog data or fixed colors\n' >&2; exit 1; fi
+assert jq -e '.id=="sero.local-ai" and (.kinds|index("bar-widget")) and (.kinds|index("panel")) and .entryPoints.barWidget=="Panel.qml" and .entryPoints.panel=="Dashboard.qml"' "$ROOT/manifest.json" >/dev/null
+if grep -Eq 'Qwen|Gemma|LFM|Ornith|#[0-9A-Fa-f]{6}' "$ROOT"/*.qml; then printf 'not ok - panel embeds catalog data or fixed colors\n' >&2; exit 1; fi
 assert grep -q 'BarIconButton {' "$ROOT/Panel.qml"
 assert grep -q 'radius: width / 2' "$ROOT/Panel.qml"
-assert grep -q 'Math.round(root.downloadProgress \* 100) + "%"' "$ROOT/Panel.qml"
-assert grep -q 'GPUs detected' "$ROOT/Panel.qml"; assert grep -q 'GPU options' "$ROOT/Panel.qml"
-for label in 'Scan' 'Download' 'Run' 'Unload' 'Open agent' 'Switch running model'; do assert grep -q "$label" "$ROOT/Panel.qml"; done
+assert grep -q 'Math.round(root.downloadProgress \* 100) + "%"' "$ROOT"/*.qml
+assert grep -q 'GPUs detected' "$ROOT"/*.qml; assert grep -q 'GPU options' "$ROOT"/*.qml
+for label in 'Scan' 'Download' 'Run' 'Unload' 'Open agent' 'Switch'; do assert grep -q "$label" "$ROOT"/*.qml; done
 ok 'theme-native panel has a circular icon, progress state, and all six lifecycle actions'
 
 help=$("$ROOT/bin/omarchy-local-ai" --help)

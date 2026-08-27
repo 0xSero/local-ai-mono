@@ -7,6 +7,7 @@ Open agent, and Switch. Run requires a real completion; failed switches restore
 the previous managed model.
 The theme-native panel auto-detects local GPUs and lets users choose every
 compatible 1, 2, 4, or larger GPU recipe in ascending order. It uses no invented data.
+The toolbar popup is a compact status surface. Open its full native panel for hardware inventory, every compatible recipe, downloads, runtime state, and lifecycle controls.
 ## Install
 ```bash
 omarchy plugin add https://github.com/0xSero/omarchy-local-ai.git --yes
