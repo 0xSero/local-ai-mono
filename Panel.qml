@@ -14,6 +14,7 @@ Panel {
 
   property var data: ({ status: { state: "loading" }, models: [] })
   property string errorText: ""
+  property string busy: ""
   readonly property string sourceDir: String(Qt.resolvedUrl(".")).replace(/^file:\/\//, "").replace(/\/$/, "")
   readonly property string cli: sourceDir + "/bin/omarchy-local-ai"
   readonly property var status: data.status || {}
@@ -25,7 +26,8 @@ Panel {
 
   function refresh() { if (sourceDir !== "" && !snapshot.running) snapshot.running = true }
   function openDashboard() { close(); Quickshell.execDetached(["omarchy-shell", "shell", "summon", "sero.local-ai", "{}"]) }
-  function openAgent() { close(); Quickshell.execDetached(["omarchy-agent", "--pick"]) }
+  function runAction(label, args, closeAfter) { if (action.running) return; busy = label; errorText = ""; action.command = [cli].concat(args); action.closeAfter = closeAfter; action.running = true }
+  function vram() { return status.vramTotalMiB ? (status.vramUsedMiB / 1024).toFixed(1) + " / " + (status.vramTotalMiB / 1024).toFixed(0) + " GB VRAM" : "VRAM unavailable" }
   onOpenedChanged: if (opened) { errorText = ""; refresh() }
 
   Process {
@@ -33,6 +35,7 @@ Panel {
     command: [root.cli, "snapshot"]
     stdout: StdioCollector { waitForEnd: true; onStreamFinished: { try { root.data = JSON.parse(text); root.errorText = "" } catch (e) { root.errorText = "Registry unavailable" } } }
   }
+  Process { id: action; property bool closeAfter: false; stderr: StdioCollector { waitForEnd: true; onStreamFinished: if (text.trim()) root.errorText = text.trim().replace(/^local-ai:\s*/, "") }; onExited: function(code) { root.busy = ""; if (code !== 0 && !root.errorText) root.errorText = "Action failed"; else if (closeAfter) root.close(); root.refresh() } }
   Timer { interval: root.opened ? 5000 : 30000; running: true; repeat: true; triggeredOnStart: true; onTriggered: root.refresh() }
 
   BarIconButton {
@@ -43,7 +46,7 @@ Panel {
       Item { Rectangle { anchors.centerIn: parent; width: Style.space(9); height: width; radius: width / 2; color: root.status.ready ? root.foreground : "transparent"; border.width: root.status.ready ? 0 : Math.max(1, Style.space(1)); border.color: root.foreground } }
     }
     tooltipText: root.status.ready ? "Local AI · " + root.status.model : "Local AI"
-    onPressed: function(buttonCode) { if (buttonCode === Qt.RightButton && root.status.ready) root.openAgent(); else root.toggle() }
+    onPressed: function(buttonCode) { if (buttonCode === Qt.RightButton && root.status.ready) root.runAction("Opening Pi", ["open-agent", "pi"], true); else root.toggle() }
   }
 
   KeyboardPanel {
@@ -72,7 +75,7 @@ Panel {
         Column {
           width: parent.width; spacing: Style.space(3)
           Text { text: root.status.model || "Local AI"; color: root.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.heading; font.weight: Font.Medium }
-          Meta { text: root.errorText || (root.status.ready ? "ready" : root.status.running ? "loading" : "nothing running") }
+          Meta { text: root.errorText || root.busy || (root.status.ready ? "API ready · " + root.vram() : root.status.running ? "loading" : "nothing running") }
         }
         Column {
           width: parent.width; spacing: Style.space(3)
@@ -84,7 +87,8 @@ Panel {
           width: parent.width; spacing: Style.space(11)
           Link { text: "Open Local AI panel"; onTriggered: root.openDashboard() }
           Rule {}
-          Link { text: "Open agent"; visible: Boolean(root.status.ready); onTriggered: root.openAgent() }
+          Link { text: "Open Pi"; visible: Boolean(root.status.ready); onTriggered: root.runAction("Opening Pi", ["open-agent", "pi"], true) }
+          Link { text: "Unload model"; visible: Boolean(root.status.running); onTriggered: root.runAction("Unloading", ["unload"], false) }
         }
       }
     }

@@ -13,6 +13,7 @@ Item {
   property int selectedIndex: 0
   property string busy: ""
   property string errorText: ""
+  property string notice: ""
   property bool closingFromHost: false
   readonly property string sourceDir: String(Qt.resolvedUrl(".")).replace(/^file:\/\//, "").replace(/\/$/, "")
   readonly property string cli: sourceDir + "/bin/omarchy-local-ai"
@@ -35,17 +36,18 @@ Item {
   function refresh() { if (!snapshot.running) snapshot.running = true }
   function choose(index) { if (models.length) selectedIndex = Math.max(0, Math.min(models.length - 1, index)) }
   function selected() { return models.length ? models[selectedIndex] : null }
-  function runAction(label, args) { if (busy || action.running) return; busy = label; errorText = ""; action.command = [cli].concat(args); action.running = true }
+  function runAction(label, args) { if (busy || action.running) return; busy = label; errorText = ""; notice = ""; action.command = [cli].concat(args); action.running = true }
   function primary() { var m = selected(); if (!m) return; if (!m.downloaded) runAction("Downloading", ["download", m.recipeId]); else if (status.running) runAction("Switching", ["switch", m.recipeId]); else runAction("Loading", ["run", m.recipeId]) }
-  function openAgent(name) { Quickshell.execDetached([cli, "open-agent", name]) }
-  function modelState(m) { if (m.active) return "running"; if (busy === "Downloading" && selected() && selected().recipeId === m.recipeId) return "downloading"; return m.downloaded ? "downloaded" : m.ready ? "download" : "hardware busy" }
+  function openAgent(name) { runAction("Opening " + name, ["open-agent", name]) }
+  function vram() { return status.vramTotalMiB ? (status.vramUsedMiB / 1024).toFixed(1) + " / " + (status.vramTotalMiB / 1024).toFixed(0) + " GB VRAM" : "VRAM unavailable" }
+  function modelState(m) { if (m.active) return status.ready ? "running" : status.running ? "loading" : "stopped"; if (busy === "Downloading" && selected() && selected().recipeId === m.recipeId) return "downloading"; return m.downloaded ? "downloaded" : m.ready ? "download" : "hardware busy" }
   function activeHardware(g) { return status.running && (status.hardware === g.product || status.hardware === g.registryName) }
 
   Process { id: snapshot; command: [root.cli, "snapshot"]; stdout: StdioCollector { waitForEnd: true; onStreamFinished: { try { root.data = JSON.parse(text); root.errorText = ""; root.choose(root.selectedIndex) } catch (e) { root.errorText = "Registry unavailable" } } } }
   Process {
     id: action
     stderr: StdioCollector { waitForEnd: true; onStreamFinished: if (text.trim()) root.errorText = text.trim().replace(/^local-ai:\s*/, "") }
-    onExited: function(exitCode) { if (exitCode !== 0 && !root.errorText) root.errorText = "Action failed"; root.busy = ""; root.refresh() }
+    onExited: function(exitCode) { if (exitCode !== 0 && !root.errorText) root.errorText = "Action failed"; else if (exitCode === 0) root.notice = root.busy + " complete"; root.busy = ""; root.refresh() }
   }
   Timer { interval: root.busy ? 2000 : 5000; running: window.visible; repeat: true; onTriggered: root.refresh() }
 
@@ -75,7 +77,7 @@ Item {
           Column {
             width: parent.width - headerActions.implicitWidth
             Text { text: "Local AI"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.iconLarge; font.weight: Font.Medium }
-            Meta { text: root.errorText || root.busy || (root.status.ready ? root.status.model + " · " + root.status.acceleratorCount + " × " + root.status.hardware + " · ready" : root.status.running ? "Model loading" : "Nothing running") }
+            Meta { text: root.errorText || root.busy || root.notice || (root.status.ready ? root.status.model + " · " + root.status.acceleratorCount + " × " + root.status.hardware + " · " + root.vram() + " · API ready" : root.status.running ? "Model loading" : "Nothing running") }
           }
           Row {
             id: headerActions; spacing: Style.space(16)
@@ -110,7 +112,7 @@ Item {
               Column {
                 required property var modelData; width: parent.width; spacing: Style.space(2)
                 Text { width: parent.width; text: modelData.count + " × " + (modelData.registryName || modelData.product); color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; wrapMode: Text.WordWrap }
-                Meta { text: Math.round(modelData.memoryBytesEach / 1073741824) + " GB each · " + modelData.backend + (root.activeHardware(modelData) ? " · running " + root.status.model : "") }
+                Meta { text: Math.round(modelData.memoryBytesEach / 1073741824) + " GB each · " + modelData.backend + (root.activeHardware(modelData) ? " · " + root.vram() + " · running " + root.status.model : "") }
               }
             }
             Label { text: "REGISTRY"; topPadding: Style.space(8) }

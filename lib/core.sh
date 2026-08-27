@@ -57,12 +57,12 @@ hardware_json() {
   fi
   local nvidia='[]' intel='[]' rows count disk docker=false
   if command -v nvidia-smi >/dev/null 2>&1; then
-    rows=$(nvidia-smi --query-gpu=index,name,memory.total,memory.free --format=csv,noheader,nounits 2>/dev/null || true)
+    rows=$(nvidia-smi --query-gpu=index,name,memory.total,memory.used,memory.free --format=csv,noheader,nounits 2>/dev/null || true)
     nvidia=$(jq -Rsc '
       split("\n") | map(select(length > 0) | split(",") | map(gsub("^ +| +$"; "")))
-      | map({backend:"nvidia", index:.[0]|tonumber, product:.[1], totalMiB:.[2]|tonumber, freeMiB:.[3]|tonumber})
+      | map({backend:"nvidia", index:.[0]|tonumber, product:.[1], totalMiB:.[2]|tonumber, usedMiB:.[3]|tonumber, freeMiB:.[4]|tonumber})
       | group_by(.product) | map({backend:.[0].backend, product:.[0].product, count:length,
-          memoryBytesEach:(.[0].totalMiB * 1048576), devices:map({index,totalMiB,freeMiB})})
+          memoryBytesEach:(.[0].totalMiB * 1048576), devices:map({index,totalMiB,usedMiB,freeMiB})})
     ' <<<"$rows")
   fi
   count=$(lspci -Dnn 2>/dev/null | grep -c 'Arc Pro B70' || true)
@@ -382,15 +382,23 @@ run_recipe() {
 
 active_recipe() { [[ -f $AI_ACTIVE ]] || fail "no active model"; jq -c '.recipe' "$AI_ACTIVE"; }
 
+model_vram_json() {
+  local recipe backend used=0 total ids='[]'
+  recipe=$(active_recipe); backend=$(jq -r '.compatibility.acceleratorBackend' <<<"$recipe"); total=$(jq -r '.compatibility.minimumMemoryBytesEach*.compatibility.acceleratorCount/1048576|floor' <<<"$recipe")
+  if [[ $backend == nvidia ]]; then ids=$(docker inspect "$AI_CONTAINER" | jq -c '.[0].HostConfig.DeviceRequests[0].DeviceIDs//[]|map(tonumber)'); used=$(hardware_json | jq --argjson ids "$ids" '[.groups[]|select(.backend=="nvidia").devices[]|select(.index as $i|$ids|index($i))|.usedMiB]|add//0');
+  else used=$(docker exec "$AI_CONTAINER" sh -c "awk '/^drm-resident-vram[0-9]*:/{sum+=\$2} END{printf \"%.0f\",sum/1024}' /proc/1/fdinfo/*" 2>/dev/null || printf 0); fi
+  jq -n --argjson used "${used:-0}" --argjson total "$total" '{vramUsedMiB:$used,vramTotalMiB:$total,vramPercent:(if $total>0 then ($used*100/$total) else 0 end)}'
+}
+
 status_json() {
   if [[ ! -f $AI_ACTIVE ]]; then jq -n '{state:"not-setup",ready:false,running:false}'; return; fi
-  local running=false ready=false recipe
+  local running=false ready=false recipe served='' live='{"vramUsedMiB":0,"vramTotalMiB":0,"vramPercent":0}'
   recipe=$(active_recipe)
   [[ $(docker inspect -f '{{.State.Running}}' "$AI_CONTAINER" 2>/dev/null) == true ]] && running=true
-  $running && served_model >/dev/null 2>&1 && ready=true
+  if $running; then served=$(served_model 2>/dev/null || true); [[ -n $served ]] && ready=true; live=$(model_vram_json); fi
   jq -n --arg model "$(jq -r '.model.name // .model.id' <<<"$recipe")" --arg recipe "$(jq -r '.id' <<<"$recipe")" --arg hardware "$(jq -r '.localProduct // .compatibility.hardwareId' <<<"$recipe")" \
-    --arg engine "$(jq -r '.engine.name' <<<"$recipe")" --argjson accelerators "$(jq -r '.compatibility.acceleratorCount' <<<"$recipe")" --argjson running "$running" --argjson ready "$ready" --argjson port "$AI_PORT" \
-    '{state:(if $ready then "ready" elif $running then "loading" else "stopped" end),ready:$ready,running:$running,model:$model,recipeId:$recipe,engine:$engine,hardware:$hardware,acceleratorCount:$accelerators,port:$port}'
+    --arg engine "$(jq -r '.engine.name' <<<"$recipe")" --arg served "$served" --argjson live "$live" --argjson accelerators "$(jq -r '.compatibility.acceleratorCount' <<<"$recipe")" --argjson running "$running" --argjson ready "$ready" --argjson port "$AI_PORT" \
+    '{state:(if $ready then "ready" elif $running then "loading" else "stopped" end),ready:$ready,running:$running,model:$model,servedModel:$served,recipeId:$recipe,engine:$engine,hardware:$hardware,acceleratorCount:$accelerators,port:$port}+$live'
 }
 
 downloads_json() {
