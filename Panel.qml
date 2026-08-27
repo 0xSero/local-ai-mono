@@ -35,7 +35,7 @@ Panel {
     command: [root.cli, "snapshot"]
     stdout: StdioCollector { waitForEnd: true; onStreamFinished: { try { root.data = JSON.parse(text); root.errorText = "" } catch (e) { root.errorText = "Registry unavailable" } } }
   }
-  Process { id: action; property bool closeAfter: false; stderr: StdioCollector { waitForEnd: true; onStreamFinished: if (text.trim()) root.errorText = text.trim().replace(/^local-ai:\s*/, "") }; onExited: function(code) { root.busy = ""; if (code !== 0 && !root.errorText) root.errorText = "Action failed"; else if (closeAfter) root.close(); root.refresh() } }
+  Process { id: action; property bool closeAfter: false; stderr: StdioCollector { waitForEnd: true; onStreamFinished: if (text.trim()) root.errorText = text.trim().replace(/^local-ai:\s*/, "") } onExited: function(code) { root.busy = ""; if (code !== 0 && !root.errorText) root.errorText = "Action failed"; else if (closeAfter) root.close(); root.refresh() } }
   Timer { interval: root.opened ? 5000 : 30000; running: true; repeat: true; triggeredOnStart: true; onTriggered: root.refresh() }
 
   BarIconButton {
