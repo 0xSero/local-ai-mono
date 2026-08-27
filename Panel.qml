@@ -271,7 +271,7 @@ Panel {
                 }
                 Text {
                   id: modelState
-                  text: modelData.acceleratorCount + " GPU" + (modelData.acceleratorCount === 1 ? "" : "s")
+                  text: modelData.acceleratorCount + " GPU" + (modelData.acceleratorCount === 1 ? "" : "s") + " · " + (modelData.hardware.indexOf("Intel") >= 0 ? "Arc" : "RTX")
                   color: root.dim
                   font.family: root.bar.fontFamily
                   font.pixelSize: Style.font.caption
