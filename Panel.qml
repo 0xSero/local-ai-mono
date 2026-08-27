@@ -3,7 +3,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
-
+// Bar icon + keyboard panel. Renders purely from one `omarchy-local-ai snapshot` blob.
 Panel {
   id: root
   moduleName: "sero.local-ai"
@@ -11,44 +11,44 @@ Panel {
   manageIpc: false
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
-
-  property var data: ({ status: { state: "loading" }, models: [] })
-  property string errorText: ""
-  property string busy: ""
+  property var snap: JSON.parse('{"state":"uninitialized","operation":{},"active":{},"gpus":[],"registry":{},"hardware":{"groups":[]},"models":[],"error":""}')
   readonly property string sourceDir: String(Qt.resolvedUrl(".")).replace(/^file:\/\//, "").replace(/\/$/, "")
   readonly property string cli: sourceDir + "/bin/omarchy-local-ai"
-  readonly property var status: data.status || {}
-  readonly property var groups: data.hardware && data.hardware.groups ? data.hardware.groups : []
-  readonly property int gpuCount: { var n = 0; for (var i = 0; i < groups.length; i++) n += Number(groups[i].count || 0); return n }
-  readonly property int recipeCount: data.registry ? Number(data.registry.recipeCount || 0) : 0
+  readonly property var active: snap.active || ({})
+  readonly property var operation: snap.operation || ({})
+  readonly property var gpus: snap.gpus || []
+  readonly property string state: snap.state || "uninitialized"
+  readonly property bool hasActive: Boolean(active.container); readonly property bool loaded: Boolean(active.apiReady) && hasActive
+  readonly property bool busy: ["scanning", "downloading", "starting", "switching", "unloading"].indexOf(state) >= 0
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color dim: Util.alpha(foreground, 0.55)
-
-  function refresh() { if (sourceDir !== "" && !snapshot.running) snapshot.running = true }
+  function refresh() { if (sourceDir !== "" && !poll.running) poll.running = true }
   function openDashboard() { close(); Quickshell.execDetached(["omarchy-shell", "shell", "summon", "sero.local-ai", "{}"]) }
-  function runAction(label, args, closeAfter) { if (action.running) return; busy = label; errorText = ""; action.command = [cli].concat(args); action.closeAfter = closeAfter; action.running = true }
-  function vram() { return status.vramTotalMiB ? (status.vramUsedMiB / 1024).toFixed(1) + " / " + (status.vramTotalMiB / 1024).toFixed(0) + " GB VRAM" : "VRAM unavailable" }
-  onOpenedChanged: if (opened) { errorText = ""; refresh() }
-
-  Process {
-    id: snapshot
-    command: [root.cli, "snapshot"]
-    stdout: StdioCollector { waitForEnd: true; onStreamFinished: { try { root.data = JSON.parse(text); root.errorText = "" } catch (e) { root.errorText = "Registry unavailable" } } }
+  function act(args, closeAfter) { if (action.running) return; action.command = [cli].concat(args); action.closeAfter = closeAfter; action.running = true }
+  function line() {
+    if (snap.error) return "error · " + snap.error
+    if (busy) return (operation.name || state) + (operation.indeterminate ? " · " + (operation.detail || "working") : " · " + (operation.percent || 0) + "%")
+    if (loaded) return active.servedModel + " · " + active.endpoint
+    return state
   }
-  Process { id: action; property bool closeAfter: false; stderr: StdioCollector { waitForEnd: true; onStreamFinished: if (text.trim()) root.errorText = text.trim().replace(/^local-ai:\s*/, "") } onExited: function(code) { root.busy = ""; if (code !== 0 && !root.errorText) root.errorText = "Action failed"; else if (closeAfter) root.close(); root.refresh() } }
-  Timer { interval: root.opened ? 5000 : 30000; running: true; repeat: true; triggeredOnStart: true; onTriggered: root.refresh() }
-
+  onOpenedChanged: if (opened) refresh()
+  Process {
+    id: poll
+    command: [root.cli, "snapshot"]
+    stdout: StdioCollector { waitForEnd: true; onStreamFinished: { try { root.snap = JSON.parse(text) } catch (e) {} } }
+  }
+  Process { id: action; property bool closeAfter: false; onExited: { if (closeAfter) root.close(); root.refresh() } }
+  Timer { interval: root.opened ? (root.busy ? 1000 : 4000) : 30000; running: true; repeat: true; triggeredOnStart: true; onTriggered: root.refresh() }
   BarIconButton {
     id: button
     anchors.fill: parent
     bar: root.bar
     iconComponent: Component {
-      Item { Rectangle { anchors.centerIn: parent; width: Style.space(9); height: width; radius: width / 2; color: root.status.ready ? root.foreground : "transparent"; border.width: root.status.ready ? 0 : Math.max(1, Style.space(1)); border.color: root.foreground } }
+      Item { Rectangle { anchors.centerIn: parent; width: Style.space(9); height: width; radius: width / 2; color: root.loaded ? root.foreground : "transparent"; border.width: root.loaded ? 0 : Math.max(1, Style.space(1)); border.color: root.foreground } }
     }
-    tooltipText: root.status.ready ? "Local AI · " + root.status.model : "Local AI"
-    onPressed: function(buttonCode) { if (buttonCode === Qt.RightButton && root.status.ready) root.runAction("Opening Pi", ["open-agent", "pi"], true); else root.toggle() }
+    tooltipText: root.loaded ? "Local AI · " + root.active.name : "Local AI · " + root.state
+    onPressed: function(code) { if (code === Qt.RightButton && root.loaded) root.act(["open-agent", "pi"], true); else root.toggle() }
   }
-
   KeyboardPanel {
     id: panel
     anchorItem: button
@@ -58,47 +58,46 @@ Panel {
     focusTarget: keys
     contentWidth: panel.fittedContentWidth(Style.space(260))
     contentHeight: panel.fittedContentHeight(content.implicitHeight)
-
     PanelKeyCatcher {
       id: keys
       anchors.fill: parent
       onActivateRequested: root.openDashboard()
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
-
       Column {
         id: content
         anchors.left: parent.left
         anchors.right: parent.right
-        spacing: Style.space(14)
-
+        spacing: Style.space(12)
         Column {
           width: parent.width; spacing: Style.space(3)
-          Text { width: parent.width; text: root.status.model || "Local AI"; color: root.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.heading; font.weight: Font.Medium; elide: Text.ElideRight }
-          Meta { width: parent.width; text: root.errorText || root.busy || (root.status.ready ? "API + " + (root.status.tools ? "tools ready · " : "chat only · ") + root.vram() : root.status.running ? "loading" : "nothing running") }
+          Text { width: parent.width; text: root.loaded ? root.active.name : "Local AI"; color: root.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.heading; font.weight: Font.Medium; elide: Text.ElideRight }
+          Meta { width: parent.width; text: root.line() }
+          Meta { width: parent.width; text: root.loaded ? "api " + (root.active.apiReady ? "ready" : "pending") + " · tools " + (root.active.toolCallReady ? "ready" : root.active.tools ? "pending" : "n/a") : (root.snap.models || []).length + " recipes" }
         }
         Column {
           width: parent.width; spacing: Style.space(3)
-          Meta { text: root.gpuCount + " GPUs detected"; color: root.foreground }
-          Repeater { model: root.groups; Meta { required property var modelData; width: content.width; text: modelData.count + " × " + (modelData.registryName || modelData.product); elide: Text.ElideRight } }
-          Meta { text: root.recipeCount + " matching recipes" }
+          Repeater {
+            model: root.gpus
+            Meta { required property var modelData; width: content.width; text: modelData.backend + " " + modelData.index + " · " + (modelData.usedMiB === null || modelData.usedMiB === undefined ? "unavailable" : modelData.usedMiB + " / " + modelData.totalMiB + " MiB") }
+          }
         }
         Column {
-          width: parent.width; spacing: Style.space(11)
+          width: parent.width; spacing: Style.space(10)
           Link { text: "Open Local AI panel"; onTriggered: root.openDashboard() }
           Rule {}
-          Link { text: "Open Pi"; visible: Boolean(root.status.ready); onTriggered: root.runAction("Opening Pi", ["open-agent", "pi"], true) }
-          Link { text: "Unload model"; visible: Boolean(root.status.running); onTriggered: root.runAction("Unloading", ["unload"], false) }
+          Link { text: "Scan"; enabled: !root.busy; onTriggered: root.act(["scan"], false) }
+          Link { text: "Open Pi"; enabled: root.loaded; onTriggered: root.act(["open-agent", "pi"], true) }
+          Link { text: "Unload"; enabled: root.hasActive; onTriggered: root.act(["unload"], false) }
         }
       }
     }
   }
-
   component Meta: Text { color: root.dim; font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight; maximumLineCount: 1 }
   component Link: Text {
     signal triggered()
-    color: root.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall
-    MouseArea { anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: parent.triggered() }
+    color: root.foreground; opacity: enabled ? 1 : 0.32; font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight
+    MouseArea { anchors.fill: parent; enabled: parent.enabled; hoverEnabled: true; cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor; onClicked: parent.triggered() }
   }
   component Rule: Rectangle { width: parent ? parent.width : 0; height: Math.max(1, Style.spaceReal(1)); color: Util.alpha(root.foreground, 0.18) }
 }

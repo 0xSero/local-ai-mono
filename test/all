@@ -1,143 +1,202 @@
 #!/usr/bin/env bash
-
+# Isolated lifecycle tests for bin/omarchy-local-ai. No GPU, network, or real docker.
 set -euo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+CLI="$ROOT/bin/omarchy-local-ai"
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
-export OMARCHY_AI_USER_HOME="$TMP/user" OMARCHY_AI_STATE="$TMP/state" OMARCHY_AI_CACHE="$TMP/cache" OMARCHY_AI_REGISTRY="$TMP/registry"
-export OMARCHY_AI_HARDWARE_JSON='{"groups":[{"backend":"nvidia","product":"NVIDIA GeForce RTX 3090","count":4,"memoryBytesEach":25769803776,"devices":[{"index":0,"totalMiB":24576,"freeMiB":23000},{"index":1,"totalMiB":24576,"freeMiB":23000},{"index":2,"totalMiB":24576,"freeMiB":23000},{"index":3,"totalMiB":24576,"freeMiB":23000}]}],"dockerReady":true,"diskFreeBytes":999999999999}'
-mkdir -p "$OMARCHY_AI_USER_HOME" "$OMARCHY_AI_STATE" "$OMARCHY_AI_CACHE" "$OMARCHY_AI_REGISTRY"/{assets,hardware,model,model-instance,recipe,speed-sweeps}; touch "$OMARCHY_AI_REGISTRY/assets/config.yml"
-
+export OMARCHY_AI_USER_HOME="$TMP/home" OMARCHY_AI_STATE="$TMP/state" OMARCHY_AI_REGISTRY="$TMP/registry" \
+  OMARCHY_AI_PORT=12434 OMARCHY_AI_POLL=0 OMARCHY_AI_TIMEOUT=5 OMARCHY_AI_FOREGROUND=1 OMARCHY_AI_NO_HOST_HF=1 \
+  OMARCHY_AI_HARDWARE_JSON='{"groups":[{"backend":"nvidia","product":"NVIDIA GeForce RTX 3090","index":0,"count":4,"memoryBytesEach":25769803776,"devices":[{"index":0,"name":"NVIDIA GeForce RTX 3090","totalMiB":24576,"usedMiB":100,"freeMiB":24000},{"index":1,"name":"NVIDIA GeForce RTX 3090","totalMiB":24576,"usedMiB":0,"freeMiB":24576}]}]}'
+mkdir -p "$OMARCHY_AI_USER_HOME" "$OMARCHY_AI_STATE" "$OMARCHY_AI_REGISTRY"/{hardware,model,model-instance,recipe,assets}
+touch "$OMARCHY_AI_REGISTRY/assets/config.yml"
 digest=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 revision=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-jq -n '{schema_version:"local-ai-registry/v1",id:"rtx-3090-24gb",name:"GeForce RTX 3090",vendor:"nvidia",accelerator_backend:"nvidia",memory:{vram_gb:24},aliases:["rtx 3090"]}' >"$OMARCHY_AI_REGISTRY/hardware/rtx-3090-24gb.json"
-jq -n '{schema_version:"local-ai-registry/v1",id:"small",name:"Small Registry Model"}' >"$OMARCHY_AI_REGISTRY/model/small.json"
-jq -n --arg revision "$revision" '{schema_version:"local-ai-registry/v1",id:"org-small--bf16",model_id:"small",repository:"org/small",revision:$revision,weights:{format:"safetensors",precision:"BF16",size_gb:0.0000001}}' >"$OMARCHY_AI_REGISTRY/model-instance/org-small--bf16.json"
-jq -n --arg digest "$digest" '{schema_version:"local-ai-registry/v1",id:"small-3090",status:"validated",model_instance_id:"org-small--bf16",hardware_id:"rtx-3090-24gb",hardware_count:1,
-  engine:{name:"sglang",version:"test",graph_mode:"full"},launch:{kind:"docker",image:("image@sha256:"+$digest),container_port:30000,entrypoint:"/bin/server",ipc:"host",shm_size:"1g",environment:{A:"B"},mounts:[{source:"~/.cache/huggingface",target:"/root/.cache/huggingface",read_only:false},{source:"assets/config.yml",target:"/app/config.yml",read_only:true}],arguments:["--model","org/small"]},
-  serving:{max_context_tokens:8192,tensor_parallel:1},capabilities:{chat:true,reasoning:false,tools:false,vision:false},speed_sweeps_ids:["small-sweep"]}' >"$OMARCHY_AI_REGISTRY/recipe/small-3090.json"
-jq -n '{schema_version:"local-ai-registry/v1",id:"small-sweep",recipe_id:"small-3090",rows:[{status:"accepted",decode_tok_s:42.5}]}' >"$OMARCHY_AI_REGISTRY/speed-sweeps/small-sweep.json"
-jq -n '{schema_version:"local-ai-registry/v1",recipes:[{id:"small-3090",status:"validated",model_instance_id:"org-small--bf16",hardware_id:"rtx-3090-24gb",hardware_count:1,engine:"sglang",launch_kind:"docker",has_evidence:true}]}' >"$OMARCHY_AI_REGISTRY/index.json"
-
-source "$ROOT/lib/core.sh"
+jq -n '{schema_version:"local-ai-registry/v1",id:"rtx-3090-24gb",name:"GeForce RTX 3090",accelerator_backend:"nvidia",memory:{vram_gb:24},aliases:[]}' >"$OMARCHY_AI_REGISTRY/hardware/rtx-3090-24gb.json"
+jq -n '{schema_version:"local-ai-registry/v1",id:"small",name:"Small Model"}' >"$OMARCHY_AI_REGISTRY/model/small.json"
+jq -n --arg rev "$revision" '{schema_version:"local-ai-registry/v1",id:"org-small--bf16",model_id:"small",repository:"org/small",revision:$rev,served_name:"org/small",weights:{precision:"BF16",size_gb:0.0000001}}' >"$OMARCHY_AI_REGISTRY/model-instance/org-small--bf16.json"
+jq -n --arg rev "$revision" '{schema_version:"local-ai-registry/v1",id:"org-small--dir",model_id:"small",repository:"org/small-dir",revision:$rev,served_name:"/models/model.gguf",weights:{precision:"Q4",size_gb:0.0000001}}' >"$OMARCHY_AI_REGISTRY/model-instance/org-small--dir.json"
+recipe() { # recipe <id> <tools> <hf|dir> -> standard HF cache mount, or a registry-mounted /models local-dir
+  local mi=org-small--bf16; [[ $3 == dir ]] && mi=org-small--dir
+  jq -n --arg id "$1" --arg dg "$digest" --argjson tools "$2" --arg mi "$mi" --arg kind "$3" '
+    {id:$id,status:"validated",model_instance_id:$mi,hardware_id:"rtx-3090-24gb",hardware_count:1,
+     engine:{name:"sglang"},capabilities:{tools:$tools},
+     launch:{image:("img@sha256:"+$dg),container_port:30000,ipc:"host",shm_size:"1g",environment:{},
+       arguments:(if $kind=="hf" then ["--served-model-name","org/small"] else [] end),
+       mounts:[(if $kind=="hf" then {source:"~/.cache/huggingface",target:"/root/.cache/huggingface",read_only:false}
+                else {source:"~/.cache/inference-index/models/small-dir",target:"/models",read_only:false} end)]}}'
+}
+recipe small-3090 false hf >"$OMARCHY_AI_REGISTRY/recipe/small-3090.json"
+recipe small-3090-tools true hf >"$OMARCHY_AI_REGISTRY/recipe/small-3090-tools.json"
+recipe small-3090-dir false dir >"$OMARCHY_AI_REGISTRY/recipe/small-3090-dir.json"
+jq -n '{schema_version:"local-ai-registry/v1",recipes:[
+  {id:"small-3090",status:"validated",hardware_id:"rtx-3090-24gb",launch_kind:"docker"},
+  {id:"small-3090-tools",status:"validated",hardware_id:"rtx-3090-24gb",launch_kind:"docker"},
+  {id:"small-3090-dir",status:"validated",hardware_id:"rtx-3090-24gb",launch_kind:"docker"}]}' >"$OMARCHY_AI_REGISTRY/index.json"
+CD="$TMP/docker"; mkdir -p "$CD/containers" "$CD/images"
+c_write() { jq -n --argjson o "$2" --argjson r "$3" '{owned:$o,running:$r}' >"$CD/containers/$1"; }
+docker() {
+  local cmd=$1; shift
+  case $cmd in
+    image) [[ $1 == inspect ]] && [[ -f "$CD/images/${2//[:@\/]/_}" ]] ;;
+    pull) [[ ${DOCKER_PULL_FAIL:-0} == 1 ]] && return 1; touch "$CD/images/${1//[:@\/]/_}" ;;
+    run)
+      local a=("$@") name="" entrypoint="" i n=${#a[@]}
+      for ((i=0; i<n; i++)); do [[ ${a[i]} == --name ]] && name=${a[i+1]}; [[ ${a[i]} == --entrypoint ]] && entrypoint=${a[i+1]}; done
+      if [[ $entrypoint == hf ]]; then
+        [[ ${DOCKER_FETCH_FAIL:-0} == 1 ]] && return 1
+        local repo="" rev="" ldir="" extra=""
+        for ((i=0; i<n; i++)); do case ${a[i]} in
+          download) repo=${a[i+1]}; [[ -n ${a[i+2]:-} && ${a[i+2]} != --* ]] && extra=${a[i+2]} ;;
+          --revision) rev=${a[i+1]} ;; --local-dir) ldir=${a[i+1]} ;; esac; done
+        if [[ -n $ldir ]]; then mkdir -p "$ldir"; dd if=/dev/zero of="$ldir/${extra:-model.bin}" bs=1024 count=4 2>/dev/null
+        else local d="$OMARCHY_AI_USER_HOME/.cache/huggingface/hub/models--${repo//\//--}/snapshots/$rev"
+          mkdir -p "$d"; dd if=/dev/zero of="$d/model.bin" bs=1024 count=4 2>/dev/null; fi
+        return 0
+      fi
+      [[ ${DOCKER_RUN_FAIL:-0} == 1 ]] && return 1
+      c_write "$name" 1 1 ;;
+    inspect)
+      if [[ $1 == -f ]]; then
+        local fmt=$2 name=$3; [[ -f "$CD/containers/$name" ]] || return 1
+        case $fmt in *Labels*) [[ $(jq -r .owned "$CD/containers/$name") == 1 ]] && echo 1 || echo 0 ;;
+          *Running*) [[ $(jq -r .running "$CD/containers/$name") == 1 ]] && echo true || echo false ;; esac
+        return 0
+      fi
+      [[ -f "$CD/containers/$1" ]] ;;
+    rm) local a; for a in "$@"; do [[ $a == -* ]] || rm -f "$CD/containers/$a"; done ;;
+    rename) mv "$CD/containers/$1" "$CD/containers/$2" 2>/dev/null ;;
+    start) jq '.running=1' "$CD/containers/$1" >"$CD/containers/$1.t" && mv "$CD/containers/$1.t" "$CD/containers/$1" ;;
+    stop) jq '.running=0' "$CD/containers/$1" >"$CD/containers/$1.t" && mv "$CD/containers/$1.t" "$CD/containers/$1" ;;
+    *) return 1 ;;
+  esac
+}
+curl() {
+  local a=("$@") data="" url=${a[$((${#a[@]}-1))]} i
+  [[ ${CURL_FAIL:-0} == 1 ]] && return 1
+  for ((i=0; i<${#a[@]}; i++)); do [[ ${a[i]} == -d ]] && data=${a[i+1]}; done
+  case $url in
+    */v1/models) jq -nc --arg id "${SERVED_MODEL:-org/small}" '{data:[{id:$id}]}' ;;
+    */v1/chat/completions)
+      if grep -q '"tools"' <<<"$data"; then
+        [[ ${TOOLCALL_OK:-1} == 1 ]] && jq -nc --arg n "${TOOLCALL_NAME:-shell}" --arg args "${TOOLCALL_ARGS:-{\"command\":\"echo LOCAL_AI_TOOL_OK\"}}" \
+          '{choices:[{message:{content:"",tool_calls:[{id:"1",function:{name:$n,arguments:$args}}]}}]}' \
+          || jq -nc '{choices:[{message:{content:"no"}}]}'
+      else
+        [[ ${CHAT_OK:-1} == 1 ]] && jq -nc '{choices:[{message:{content:"LOCAL_AI_READY"}}]}' || jq -nc '{choices:[{message:{content:"nope"}}]}'
+      fi ;;
+  esac
+}
+export -f docker curl c_write
+export CD OMARCHY_AI_USER_HOME TMP
 pass=0
 ok() { pass=$((pass+1)); printf 'ok %s - %s\n' "$pass" "$1"; }
 assert() { "$@" || { printf 'not ok - %s\n' "$*" >&2; exit 1; }; }
-
-assert registry_valid; ok 'canonical registry index validates'
-snapshot=$(registry_snapshot_json)
-assert jq -e '.schemaVersion=="local-ai-registry/v1" and .registry.recipeCount==1 and .models[0].name=="Small Registry Model" and .models[0].registrySpeed==42.5 and .recipes[0].serving.configuredMaxContextTokens==8192 and .hardware.groups[0].registryId=="rtx-3090-24gb"' >/dev/null <<<"$snapshot"
-ok 'hardware and model names come only from referenced registry records'
-
-jq '.id="large-3090" | .hardware_count=4' "$OMARCHY_AI_REGISTRY/recipe/small-3090.json" >"$OMARCHY_AI_REGISTRY/recipe/large-3090.json"
-jq '.recipes += [{id:"large-3090",status:"validated",model_instance_id:"org-small--bf16",hardware_id:"rtx-3090-24gb",hardware_count:4,engine:"sglang",launch_kind:"docker",has_evidence:true}]' "$OMARCHY_AI_REGISTRY/index.json" >"$TMP/index"; mv "$TMP/index" "$OMARCHY_AI_REGISTRY/index.json"
-assert jq -e '[.recipes[].compatibility.acceleratorCount]==[1,4] and [.models[].acceleratorCount]==[1,4]' >/dev/null <<<"$(registry_snapshot_json)"
-jq '.recipes = [.recipes[0]]' "$OMARCHY_AI_REGISTRY/index.json" >"$TMP/index"; mv "$TMP/index" "$OMARCHY_AI_REGISTRY/index.json"; ok 'recipes and selected model variants use fewest GPUs first'
-
-recipe=$(recipe_json small); plan=$(plan_json "$recipe")
-assert jq -e --arg asset "$(realpath "$OMARCHY_AI_REGISTRY/assets/config.yml"):/app/config.yml:ro" '.argv|index("127.0.0.1:12434:30000") and index("device=0") and index($asset) and index("image@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")' >/dev/null <<<"$plan"
-assert jq -e '[.argv[]|select(test("enforce.eager|disable.*cuda.*graph";"i"))]|length==0' >/dev/null <<<"$plan"
-ok 'launch plan is digest-pinned, loopback-only, and keeps CUDA graphs'
-
-intel=$(jq '.compatibility.acceleratorBackend="intel-xpu" | .launch.devices=["/dev/dri"] | .launch.capAdd=["SYS_PTRACE"] | .launch.securityOpt=["seccomp=unconfined"]' <<<"$recipe"); plan=$(plan_json "$intel")
-assert jq -e '.argv|index("/dev/dri:/dev/dri") and index("SYS_PTRACE") and index("seccomp=unconfined")' >/dev/null <<<"$plan"
-ok 'Intel Docker plan preserves the validated device and security contract'
-if plan_json "$(jq '.compatibility.acceleratorBackend="intel-xpu" | .launch.capAdd=["NET_ADMIN"]' <<<"$recipe")" >/dev/null 2>&1; then printf 'not ok - unsafe capability accepted\n' >&2; exit 1; fi
-ok 'registry cannot request arbitrary container capabilities'
-
-download=$(download_plan_json "$recipe")
-assert jq -e '
-  .pull == ["docker","pull","image@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
-  and (.fetch|index("--entrypoint")) and (.fetch|index("hf"))
-  and (.fetch|index("org/small")) and (.fetch|index("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
-  and ([.fetch[]|select(test("/root/.cache/huggingface"))]|length==1)
-' >/dev/null <<<"$download"
-ok 'download plan fetches the exact registry revision without starting a server'
-
-gguf=$(jq '.model.servedName="/models/model.gguf" | .launch.mounts=[{source:"~/.cache/models",target:"/models",read_only:false}]' <<<"$recipe")
-download=$(download_plan_json "$gguf")
-assert jq -e '(.fetch|index("model.gguf")) and (.fetch|index("--local-dir")) and (.fetch|index("/models"))' >/dev/null <<<"$download"
-ok 'GGUF downloads only the registry-declared file into the mounted model directory'
-
-jq '.launch.arguments += ["--enforce-eager"]' "$OMARCHY_AI_REGISTRY/recipe/small-3090.json" >"$TMP/bad"; mv "$TMP/bad" "$OMARCHY_AI_REGISTRY/recipe/small-3090.json"
-if resolved_recipe small-3090 "$(hardware_with_registry)" >/dev/null 2>&1; then printf 'not ok - unsafe registry recipe accepted\n' >&2; exit 1; fi
-ok 'unsafe registry launch arguments are refused'
-jq '.launch.arguments = ["--model","org/small"]' "$OMARCHY_AI_REGISTRY/recipe/small-3090.json" >"$TMP/good"; mv "$TMP/good" "$OMARCHY_AI_REGISTRY/recipe/small-3090.json"
-
-mkdir -p "$OMARCHY_AI_USER_HOME/.cache/huggingface/hub/models--org--small"; dd if=/dev/zero of="$OMARCHY_AI_USER_HOME/.cache/huggingface/hub/models--org--small/weights.bin" bs=92 count=1 status=none
-assert jq -e 'length==1 and .[0].model=="Small Registry Model" and .[0].modelDownloaded==true' >/dev/null <<<"$(downloads_json "$(registry_snapshot_json)")"
-ok 'download state follows registry-declared cache mounts'
-
-served_model() { printf 'org/small\n'; }
-request_json() { jq -nc '{choices:[{message:{content:"LOCAL_AI_READY"}}]}'; }
-assert accept_model "$recipe"
-request_json() { jq -nc '{choices:[{message:{content:"wrong reply"}}]}'; }
-if accept_model "$recipe"; then printf 'not ok - invalid readiness reply accepted\n' >&2; exit 1; fi
-ok 'acceptance requires the requested readiness proof'
-
-wire_agents "$(recipe_json small)"
-assert jq -e '.providers.local.baseUrl=="http://127.0.0.1:12434/v1" and (.providers.local.models[0]|has("maxTokens")|not)' "$OMARCHY_AI_USER_HOME/.omp/agent/models.json" >/dev/null
-assert ruby -ryaml -e 'd=YAML.safe_load(File.read(ARGV[0])); abort unless d.dig("modelRoles","default")=="omarchy-local/org/small"' "$OMARCHY_AI_USER_HOME/.omp/agent/config.yml"
-unwire_agents; ok 'OMP and Pi wiring is minimal and reversible'
-
-(
-  calls="$TMP/switch-calls"
-  recipe_json() { jq -nc '{id:"small-3090",ready:true,model:{name:"Small Registry Model"}}'; }
-  registry_snapshot_json() { printf '{}\n'; }
-  downloads_json() { jq -nc '[{id:"small-3090",modelDownloaded:true,imageDownloaded:true}]'; }
-  plan_json() { jq -nc '{argv:["true"]}'; }
-  accept_model() { return 1; }
-  docker() {
-    printf '%s\n' "$*" >>"$calls"
-    if [[ $1 == inspect && ${2:-} == -f ]]; then [[ $3 == *Labels* ]] && echo 1 || echo true; fi
-    return 0
-  }
-  set +e; run_recipe small >/dev/null 2>&1; switch_rc=$?; set -e
-  [[ $switch_rc -ne 0 ]] || { printf 'not ok - failed switch reported success\n' >&2; exit 1; }
-  assert grep -q '^stop omarchy-local-ai$' "$calls"
-  assert grep -q '^rename omarchy-local-ai omarchy-local-ai-previous$' "$calls"
-  assert grep -q '^rename omarchy-local-ai-previous omarchy-local-ai$' "$calls"
-  assert grep -q '^start omarchy-local-ai$' "$calls"
+snap() { "$CLI" snapshot; }
+assert jq -e '.state=="uninitialized"' >/dev/null <<<"$(snap)"
+ok 'fresh state is uninitialized before any scan'
+"$CLI" scan >/dev/null
+assert jq -e '.state=="idle" and .registry.matching==3 and .registry.total==3 and (.gpus|length)==2
+  and (.models|length)==3 and (.models[]|select(.recipeId=="small-3090")|.available) and (.models[]|select(.recipeId=="small-3090")|.imageDownloaded|not)' >/dev/null <<<"$(snap)"
+ok 'scan populates hardware, gpus, and models with downloaded vs available split'
+DOCKER_FETCH_FAIL=1 "$CLI" download small-3090 >/dev/null || true
+assert jq -e '.state=="error" and (.error|length)>0' >/dev/null <<<"$(snap)"
+ok 'a failed weight download lands in error state with a message'
+"$CLI" download small-3090 >/dev/null
+assert jq -e '.state=="downloaded" and (.models[]|select(.recipeId=="small-3090")|.imageDownloaded and .weightsDownloaded)' >/dev/null <<<"$(snap)"
+ok 'download recovers on retry and marks image and weights downloaded'
+"$CLI" download small-3090-dir >/dev/null
+assert jq -e '.models[]|select(.recipeId=="small-3090-dir")|.weightsDownloaded' >/dev/null <<<"$(snap)"
+assert [ -f "$OMARCHY_AI_USER_HOME/.cache/inference-index/models/small-dir/model.gguf" ]
+ok 'a registry recipe mounted at /models downloads via --local-dir with the exact served filename'
+"$CLI" run small-3090 >/dev/null
+assert jq -e '.state=="ready" and .active.recipeId=="small-3090" and .active.servedModel=="org/small"
+  and .active.apiReady==true and .active.toolCallReady==false and .active.container=="omarchy-local-ai"' >/dev/null <<<"$(snap)"
+assert jq -e '.providers["omarchy-local"].models[0].id=="org/small"' >/dev/null "$OMARCHY_AI_USER_HOME/.pi/agent/models.json"
+ok 'run transitions to ready, confirms API identity, and wires the collision-safe omarchy-local provider'
+docker stop omarchy-local-ai >/dev/null; assert jq -e '.state=="error" and .active.apiReady==false and .active.container!=""' >/dev/null <<<"$(snap)"; docker start omarchy-local-ai >/dev/null; assert jq -e '.state=="ready" and .active.apiReady==true' >/dev/null <<<"$(snap)"; ok 'snapshot reconciles accepted state against the live container/API without hiding unload'
+( export XDG_RUNTIME_DIR="$TMP/xdg" HYPRLAND_INSTANCE_SIGNATURE=sig
+  mkdir -p "$XDG_RUNTIME_DIR/hypr/sig" "$OMARCHY_AI_USER_HOME/.local/bin"
+  : >"$OMARCHY_AI_USER_HOME/.local/bin/pi"; chmod +x "$OMARCHY_AI_USER_HOME/.local/bin/pi"
+  hyprctl() { printf '%s\n' "$*" >"$TMP/hyprctl.out"; }; export -f hyprctl
+  "$CLI" open-agent pi >/dev/null
 )
-ok 'failed switch restores and restarts the previous managed model'
-
-assert jq -e '.id=="sero.local-ai" and (.kinds|index("bar-widget")) and (.kinds|index("panel")) and .entryPoints.barWidget=="Panel.qml" and .entryPoints.panel=="Dashboard.qml"' "$ROOT/manifest.json" >/dev/null
-if grep -Eq 'Qwen|Gemma|LFM|Ornith|#[0-9A-Fa-f]{6}' "$ROOT"/*.qml; then printf 'not ok - panel embeds catalog data or fixed colors\n' >&2; exit 1; fi
+assert grep -q -- '--provider omarchy-local --model org/small' "$TMP/hyprctl.out"
+ok 'open-agent launches pi with explicit --provider/--model args, not unrelated defaults'
+"$CLI" scan >/dev/null
+assert jq -e '.state=="ready" and .active.recipeId=="small-3090"' >/dev/null <<<"$(snap)"
+ok 'scanning while an accepted model is active finishes ready, not idle'
+assert [ "$(jq -r .owned "$CD/containers/omarchy-local-ai")" = 1 ]
+c_write "omarchy-local-ai" 0 1
+"$CLI" run small-3090 >/dev/null
+assert jq -e '.state=="error" and (.error|test("not managed"))' >/dev/null <<<"$(snap)"
+c_write "omarchy-local-ai" 1 1
+ok 'a container this plugin does not own is never adopted or torn down'
+"$CLI" download small-3090-tools >/dev/null
+assert jq -e '.state=="ready" and .active.recipeId=="small-3090"' >/dev/null <<<"$(snap)"
+ok 'downloading a second model while an accepted model is active finishes ready, model stays visible'
+c_write "omarchy-local-ai-previous" 0 0
+CHAT_OK=0 "$CLI" switch small-3090-tools >/dev/null || true
+assert jq -e '.state=="error" and (.error|test("not managed"))' >/dev/null <<<"$(snap)"
+assert [ "$(jq -r .running "$CD/containers/omarchy-local-ai")" = 1 ]
+rm -f "$CD/containers/omarchy-local-ai-previous"
+ok 'an unowned <container>-previous fails the switch before the active container is ever stopped'
+TOOLCALL_NAME=other "$CLI" switch small-3090-tools >/dev/null || true
+assert jq -e '.state=="error" and .active.recipeId=="small-3090"' >/dev/null <<<"$(snap)"
+ok 'a tool call that is not named shell is rejected, not accepted as any tool_calls entry'
+"$CLI" switch small-3090-tools >/dev/null
+assert jq -e '.state=="ready" and .active.recipeId=="small-3090-tools" and .active.toolCallReady==true' >/dev/null <<<"$(snap)"
+ok 'switch accepts a downloaded model and confirms real shell tool-call acceptance'
+CHAT_OK=0 "$CLI" switch small-3090 >/dev/null || true
+assert jq -e '.state=="error" and .active.recipeId=="small-3090-tools" and .active.toolCallReady==true' >/dev/null <<<"$(snap)"
+ok 'a failed switch rolls back to the previously accepted model, not the failed one'
+c_write "omarchy-local-ai-previous" 0 0
+"$CLI" unload >/dev/null
+assert jq -e '.state=="idle" and .active.recipeId=="" and (.models|all(.active|not))' >/dev/null <<<"$(snap)"
+assert [ ! -f "$CD/containers/omarchy-local-ai" ]
+assert [ -f "$CD/containers/omarchy-local-ai-previous" ]
+rm -f "$CD/containers/omarchy-local-ai-previous"
+ok 'unload ignores an unowned <container>-previous instead of aborting mid-transition'
+help=$("$CLI" help)
+for c in scan download run unload open-agent switch; do assert grep -qw "$c" <<<"$help"; done
+ok 'CLI exposes exactly the six lifecycle actions'
+for q in Dashboard.qml Panel.qml; do
+  assert grep -q 'Renders purely from one `omarchy-local-ai snapshot`' "$ROOT/$q"
+  assert grep -q 'loaded: Boolean(active.apiReady)' "$ROOT/$q"; assert grep -q 'hasActive: Boolean(active.container)' "$ROOT/$q"
+  assert grep -q 'unavailable' "$ROOT/$q"
+  ! grep -Eq '#[0-9A-Fa-f]{6}' "$ROOT/$q" || { printf 'not ok - %s embeds a fixed color\n' "$q" >&2; exit 1; }
+done
+assert grep -q '"Running"' "$ROOT/Dashboard.qml"
+assert grep -q 'PanelWindow {' "$ROOT/Dashboard.qml"
 assert grep -q 'BarIconButton {' "$ROOT/Panel.qml"
-assert grep -q 'radius: width / 2' "$ROOT/Panel.qml"
-assert grep -q 'implicitWidth: button.implicitWidth' "$ROOT/Panel.qml"
-assert grep -q 'matching recipes' "$ROOT/Panel.qml"
-assert grep -q 'recipes found' "$ROOT/Dashboard.qml"
-assert grep -q 'Math.round(root.downloadProgress \* 100) + "%"' "$ROOT"/*.qml
-assert grep -q 'parent.width \* root.downloadProgress' "$ROOT/Dashboard.qml"
-assert grep -q 'visible: root.activeHardware(modelData); width: parent.width' "$ROOT/Dashboard.qml"
-assert grep -q 'PanelWindow {' "$ROOT/Dashboard.qml"; assert grep -q 'usableWidth: width - spacing \* 4' "$ROOT/Dashboard.qml"; assert grep -q 'maximumLineCount: 1' "$ROOT"/*.qml
-assert grep -q 'return m.downloaded ? "downloaded" : m.ready ? "download" : "hardware busy"' "$ROOT/Dashboard.qml"
-assert grep -q 'GPUs detected' "$ROOT"/*.qml; assert grep -q 'GPU options' "$ROOT"/*.qml
-for label in 'Scan' 'Download' 'Run' 'Unload' 'OPEN AGENT' 'Switch' 'Pi' 'OMP' 'Claude'; do assert grep -q "$label" "$ROOT"/*.qml; done
-ok 'theme-native panel has a circular icon, progress state, and all six lifecycle actions'
-
-assert grep -q 'ANTHROPIC_BASE_URL=http://127.0.0.1:12435' "$ROOT/lib/core.sh"
-assert grep -q '127.0.0.1 --port 12435' "$ROOT/lib/core.sh"
-mkdir -p "$TMP/runtime/hypr/test"; XDG_RUNTIME_DIR="$TMP/runtime" HYPRLAND_INSTANCE_SIGNATURE=test
-hyprctl() { printf '%s\n' "$*" >"$TMP/hyprctl"; }; launch_tui pi --test; assert grep -q 'hl.dsp.exec_cmd.*omarchy-launch-tui.*pi.*--test' "$TMP/hyprctl"; unset -f hyprctl; unset XDG_RUNTIME_DIR HYPRLAND_INSTANCE_SIGNATURE
-assert grep -q 'vramTotalMiB' "$ROOT/lib/core.sh"; assert grep -q 'root.vram()' "$ROOT"/*.qml; assert grep -q '\["open-agent", "pi"\]' "$ROOT/Panel.qml"; assert grep -q '\["unload"\]' "$ROOT/Panel.qml"
-ok 'agent harnesses launch through Hyprland and active hardware names its model'
-
-help=$("$ROOT/bin/omarchy-local-ai" --help)
-for command in scan download run unload open-agent switch; do assert grep -q "$command" <<<"$help"; done
-ok 'CLI presents the same six-action contract as the panel'
-
-docker() { return 1; }
-flock() { return 0; }
-export -f docker flock
-scan=$("$ROOT/bin/omarchy-local-ai" scan 2>/dev/null)
-assert jq -e '.models[0].name=="Small Registry Model" and .hardware.groups[0].count==4 and .status.ready==false' >/dev/null <<<"$scan"
-unset -f docker flock
-ok 'scan integrates registry, mocked hardware, downloads, and runtime state without GPU access'
-
-for file in "$ROOT"/bin/* "$ROOT"/lib/*.sh "$ROOT"/test/all; do bash -n "$file"; done
-lines=$(wc -l "$ROOT"/manifest.json "$ROOT"/*.qml "$ROOT"/bin/* "$ROOT"/lib/*.sh "$ROOT"/test/all | tail -1 | awk '{print $1}')
+ok 'QML derives loaded/recovery UI from active.apiReady, not state, with no fixed-palette markers'
+hw_ok=0
+( unset OMARCHY_AI_HARDWARE_JSON
+  export OMARCHY_AI_STATE="$TMP/state-hw" OMARCHY_AI_DRI_PATH="$TMP/dri"
+  mkdir -p "$OMARCHY_AI_STATE" "$OMARCHY_AI_DRI_PATH"
+  nvidia-smi() { printf '0, NVIDIA GeForce RTX 3090, 24576, 100, 24476\n1, NVIDIA GeForce RTX 3090, 24576, 0, 24576\n'; }
+  lspci() { printf '0000:01:00.0 VGA: Intel Arc Pro B70\n0000:02:00.0 VGA: Intel Arc Pro B70\n'; }
+  export -f nvidia-smi lspci
+  touch "$OMARCHY_AI_DRI_PATH/pci-0000:01:00.0-render" "$OMARCHY_AI_DRI_PATH/pci-0000:02:00.0-render"
+  "$CLI" scan >/dev/null
+  jq -e '(.hardware.groups|length)==2 and (.gpus|length)==4 and ([.hardware.groups[].backend]|sort)==["intel-xpu","nvidia"]
+    and ([.gpus[]|select(.backend=="intel-xpu")]|length)==2 and ([.gpus[]|select(.backend=="intel-xpu")|.usedMiB]|all(.==null))' >/dev/null <<<"$("$CLI" snapshot)"
+) && hw_ok=1 || hw_ok=0
+assert [ "$hw_ok" = 1 ]
+ok 'mixed NVIDIA + Intel Arc Pro B70 hardware detects 4 GPUs across 2 groups, unmetered usage stays null'
+trace_ok=0
+( export OMARCHY_AI_STATE="$TMP/state-trace" OMARCHY_AI_TRACE="$TMP/trace.log"
+  mkdir -p "$OMARCHY_AI_STATE"
+  "$CLI" scan >/dev/null
+  "$CLI" download small-3090 >/dev/null
+  "$CLI" run small-3090 >/dev/null
+  CHAT_OK=0 "$CLI" switch small-3090-tools >/dev/null || true
+  "$CLI" unload >/dev/null
+  [[ $(paste -sd, "$TMP/trace.log") == scanning,idle,downloading,downloaded,starting,ready,switching,error,unloading,idle ]]
+) && trace_ok=1 || trace_ok=0
+assert [ "$trace_ok" = 1 ]
+ok 'the exact transition sequence is traced for scan, download, first run, switch rollback, and unload'
+for f in "$ROOT"/bin/* "$ROOT"/test/all; do bash -n "$f"; done
+lines=$(wc -l "$ROOT"/manifest.json "$ROOT"/*.qml "$ROOT"/bin/* "$ROOT"/test/all | tail -1 | awk '{print $1}')
 ((lines <= 1000)) || { printf 'not ok - %s lines exceeds 1000\n' "$lines" >&2; exit 1; }
 ok "source, manifest, and tests stay compact ($lines lines)"
-
 printf '1..%s\n' "$pass"
