@@ -12,7 +12,8 @@ compatible 1, 2, 4, or larger GPU recipe in ascending order. It uses no invented
 The toolbar popup is a compact status surface. Open its full native panel for hardware inventory, every compatible recipe, downloads, runtime state, and lifecycle controls.
 ## Install
 ```bash
-omarchy plugin add https://github.com/0xSero/local-ai-mono.git --yes
+git clone https://github.com/0xSero/local-ai-mono.git ~/local-ai-mono
+ln -s ~/local-ai-mono/packages/omarchy-plugin ~/.config/omarchy/plugins/sero.local-ai
 omarchy plugin enable sero.local-ai
 ```
 ## CLI
