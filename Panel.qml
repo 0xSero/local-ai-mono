@@ -11,42 +11,34 @@ Panel {
   manageIpc: false
 
   property var data: ({ models: [], status: { state: "loading" } })
-  property string page: "home"
-  property string selectedId: ""
-  property int cursor: 0
-  property string busy: ""
-  property string afterAction: ""
-  property string errorText: ""
-  property string lastFailure: ""
+  property string page: "home"; property string selectedId: ""
+  property int cursor: 0; property string busy: ""; property string afterAction: ""
+  property string errorText: ""; property string lastFailure: ""
 
   readonly property string sourceDir: String(Qt.resolvedUrl(".")).replace(/^file:\/\//, "").replace(/\/$/, "")
   readonly property string cli: sourceDir + "/bin/omarchy-local-ai"
-  readonly property var models: data.models || []
-  readonly property var status: data.status || {}
-  readonly property color foreground: bar ? bar.foreground : Color.foreground
-  readonly property color dim: Util.alpha(foreground, 0.55)
+  readonly property var models: data.models || []; readonly property var status: data.status || {}
+  readonly property color foreground: bar ? bar.foreground : Color.foreground; readonly property color dim: Util.alpha(foreground, 0.55)
+  readonly property var alternateModels: models.filter(function(model) { return !model.active })
+  readonly property var download: {
+    var rows = data.downloads || []
+    for (var i = 0; i < rows.length; i++) if (rows[i].id === selectedId) return rows[i]; return null
+  }
+  readonly property real downloadProgress: download && download.expectedBytes > 0
+    ? Math.min(1, download.localBytes / download.expectedBytes) : 0
 
   function selectedModel() {
     for (var i = 0; i < models.length; i++) if (models[i].recipeId === selectedId) return models[i]
     return models.length > 0 ? models[Math.min(cursor, models.length - 1)] : null
   }
-  function refresh() {
-    if (sourceDir !== "" && !snapshot.running) snapshot.running = true
-  }
+  function refresh() { if (sourceDir !== "" && !snapshot.running) snapshot.running = true }
   function choose(index) {
     if (models.length === 0) return
     cursor = ((index % models.length) + models.length) % models.length
     selectedId = models[cursor].recipeId
   }
-  function showModels() {
-    page = "models"
-    choose(cursor)
-  }
-  function showModel(model) {
-    if (!model) return
-    selectedId = model.recipeId
-    page = "model"
-  }
+  function showModels() { page = "models"; choose(cursor) }
+  function showModel(model) { if (model) { selectedId = model.recipeId; page = "model" } }
   function runAction(label, args, nextPage) {
     if (busy !== "" || action.running) return
     busy = label
@@ -111,17 +103,27 @@ Panel {
   }
 
   Timer { interval: 30000; running: true; repeat: true; triggeredOnStart: true; onTriggered: root.refresh() }
-  Timer { interval: 5000; running: root.opened; repeat: true; onTriggered: root.refresh() }
+  Timer { interval: root.busy === "Downloading" ? 2000 : 5000; running: root.opened; repeat: true; onTriggered: root.refresh() }
 
-  WidgetButton {
+  BarIconButton {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: "AI"
-    fontSize: Style.font.caption
-    dimmed: root.status.ready !== true
+    iconComponent: Component {
+      Item {
+        Rectangle {
+          anchors.centerIn: parent
+          width: Style.space(9); height: width; radius: width / 2
+          color: root.status.ready ? root.foreground : "transparent"
+          border.width: root.status.ready ? 0 : Math.max(1, Style.space(1)); border.color: root.foreground
+        }
+      }
+    }
     tooltipText: root.status.ready ? "Local AI · " + root.status.model : "Local AI"
-    onPressed: root.toggle()
+    onPressed: function(buttonCode) {
+      if (buttonCode === Qt.RightButton && root.status.ready) root.openAgent()
+      else root.toggle()
+    }
   }
 
   KeyboardPanel {
@@ -131,7 +133,7 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keys
-    contentWidth: panel.fittedContentWidth(Style.space(292))
+    contentWidth: panel.fittedContentWidth(Style.space(260))
     contentHeight: panel.fittedContentHeight(content.implicitHeight)
 
     PanelKeyCatcher {
@@ -146,58 +148,105 @@ Panel {
         id: content
         anchors.left: parent.left
         anchors.right: parent.right
-        spacing: Style.space(14)
+        spacing: Style.space(17)
 
         Column {
           width: parent.width
-          spacing: Style.space(3)
+          spacing: Style.space(6)
 
           Text {
             width: parent.width
-            text: root.busy !== "" ? root.busy
+            text: root.busy !== "" && root.selectedModel() ? root.selectedModel().name
               : root.page === "models" ? "Choose a model"
               : root.page === "model" && root.selectedModel() ? root.selectedModel().name
               : root.status.model || "Local AI"
             color: root.foreground
             font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.title
-            font.bold: true
+            font.pixelSize: Style.font.heading
+            font.weight: Font.Medium
+            font.letterSpacing: Style.spaceReal(0.25)
             elide: Text.ElideRight
           }
 
-          Text {
+          Column {
             width: parent.width
-            text: root.busy !== "" ? "This can keep working with the panel closed"
-              : root.errorText !== "" ? root.errorText
-              : root.page === "models" ? (root.models.length > 0 ? "From ~/omarchy/local-ai" : "No models match this machine")
-              : root.page === "model" && root.selectedModel()
-                ? (root.selectedModel().active ? "Running"
-                  : root.selectedModel().downloaded ? "Downloaded · " + root.selectedModel().precision
-                  : root.selectedModel().precision + " · ready to download")
-              : root.status.ready
-                ? "Ready" + (root.data.benchmark ? " · " + Number(root.data.benchmark.medianTokensPerSecond).toFixed(1) + " tok/s" : "")
-              : root.status.running ? "Loading" : "Nothing running"
-            color: root.errorText !== "" ? root.foreground : root.dim
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.bodySmall
-            wrapMode: Text.WordWrap
+            spacing: Style.space(2)
+
+            Text {
+              width: parent.width
+              text: root.errorText !== "" ? root.errorText
+                : root.busy !== "" ? root.busy
+                : root.page === "models" ? (root.models.length > 0 ? "From ~/omarchy/local-ai" : "No models match this machine")
+                : root.page === "model" && root.selectedModel()
+                  ? (root.selectedModel().active ? String(root.status.state || "stopped")
+                    : root.selectedModel().downloaded ? "downloaded · " + root.selectedModel().precision
+                    : root.selectedModel().precision + " · ready to download")
+                : root.status.ready ? "ready" : root.status.running ? "loading" : "nothing running"
+              color: root.errorText !== "" ? root.foreground : root.dim
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              wrapMode: Text.WordWrap
+            }
+
+            Text {
+              visible: root.busy === "" && root.page === "home" && root.status.ready
+              text: "Running locally"
+              color: root.dim
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
+
+            Text {
+              visible: root.busy === "" && root.page === "home" && root.status.ready && Boolean(root.data.benchmark)
+              text: Number(root.data.benchmark ? root.data.benchmark.medianTokensPerSecond : 0).toFixed(1) + " tok/s"
+              color: root.dim
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
           }
         }
 
         Column {
           width: parent.width
-          spacing: Style.space(11)
-          visible: root.busy === "" && root.page === "home"
+          spacing: Style.space(10)
+          visible: root.busy !== ""
 
-          ActionLink { text: "Open agent"; enabled: root.status.ready === true; onTriggered: root.openAgent() }
-          ActionLink { text: "Change model"; onTriggered: root.showModels() }
-          ActionLink { text: "Unload"; visible: Boolean(root.status.recipeId); onTriggered: root.runAction("Unloading", ["unload"], "home") }
-          ActionLink { text: "Scan"; onTriggered: root.runAction("Scanning", ["scan"], "models") }
+          Row {
+            width: parent.width
+            visible: root.busy === "Downloading"
+            Text { text: "Download"; color: root.dim; font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall }
+            Item { width: parent.width - parent.children[0].implicitWidth - parent.children[2].implicitWidth; height: 1 }
+            Text { text: Math.round(root.downloadProgress * 100) + "%"; color: root.dim; font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall }
+          }
+
+          Rectangle {
+            width: parent.width
+            height: Math.max(2, Style.spaceReal(2))
+            visible: root.busy === "Downloading"
+            color: Util.alpha(root.foreground, 0.18)
+            Rectangle { width: parent.width * root.downloadProgress; height: parent.height; color: root.foreground }
+          }
         }
 
         Column {
           width: parent.width
-          spacing: Style.space(11)
+          spacing: Style.space(12)
+          visible: root.busy === "" && root.page === "home"
+
+          ActionLink { text: "Change"; onTriggered: root.showModels() }
+          Hairline { visible: root.alternateModels.length > 0 }
+
+          Repeater {
+            model: root.alternateModels
+            ActionLink { required property var modelData; text: modelData.name; dimmed: true; onTriggered: root.showModel(modelData) }
+          }
+
+          ActionLink { text: "Scan"; visible: root.models.length === 0; onTriggered: root.runAction("Scanning", ["scan"], "models") }
+        }
+
+        Column {
+          width: parent.width
+          spacing: Style.space(12)
           visible: root.busy === "" && root.page === "models"
 
           Repeater {
@@ -239,13 +288,14 @@ Panel {
             }
           }
 
+          Hairline {}
           ActionLink { text: "Scan again"; onTriggered: root.runAction("Scanning", ["scan"], "models") }
           ActionLink { text: "Back"; onTriggered: root.page = "home" }
         }
 
         Column {
           width: parent.width
-          spacing: Style.space(11)
+          spacing: Style.space(12)
           visible: root.busy === "" && root.page === "model"
 
           ActionLink {
@@ -256,6 +306,7 @@ Panel {
             onTriggered: root.primary()
           }
           ActionLink { text: "Open agent"; visible: Boolean(root.selectedModel()) && root.selectedModel().active && root.status.ready === true; onTriggered: root.openAgent() }
+          ActionLink { text: "Unload"; visible: Boolean(root.selectedModel()) && root.selectedModel().active; onTriggered: root.runAction("Unloading", ["unload"], "home") }
           ActionLink { text: "Back"; onTriggered: root.page = "models" }
         }
       }
@@ -264,8 +315,9 @@ Panel {
 
   component ActionLink: Text {
     signal triggered()
+    property bool dimmed: false
     color: enabled ? root.foreground : root.dim
-    opacity: enabled ? 1 : 0.35
+    opacity: enabled ? (dimmed ? 0.72 : 1) : 0.35
     font.family: root.bar.fontFamily
     font.pixelSize: Style.font.bodySmall
     MouseArea {
@@ -275,5 +327,11 @@ Panel {
       cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
       onClicked: parent.triggered()
     }
+  }
+
+  component Hairline: Rectangle {
+    width: parent ? parent.width : 0
+    height: Math.max(1, Style.spaceReal(1))
+    color: Util.alpha(root.foreground, 0.18)
   }
 }
