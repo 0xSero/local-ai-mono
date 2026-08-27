@@ -128,8 +128,8 @@ Item {
             Repeater {
               model: [{ v: root.gpus.length, l: "GPUs" }, { v: root.models.length, l: "recipes" },
                       { v: (root.snap.registry || {}).total || 0, l: "registry" },
-                      { v: root.active.apiReady ? "yes" : "no", l: "api ready" },
-                      { v: root.active.toolCallReady ? "yes" : (root.active.tools ? "pending" : "n/a"), l: "tool calls" }]
+                      { v: Boolean(root.active.apiReady) ? "yes" : "no", l: "api ready" },
+                      { v: Boolean(root.active.toolCallReady) ? "yes" : (Boolean(root.active.tools) ? "pending" : "n/a"), l: "tool calls" }]
               Column {
                 required property var modelData
                 width: (stats.width - stats.spacing * 4) / 5; spacing: Style.space(2)
