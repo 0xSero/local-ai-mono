@@ -105,7 +105,7 @@ resolved_recipe() {
     | {
       schemaVersion:"local-ai-registry/v1", id:$r.id, status:$r.status,
       model:{id:$m.id,name:$m.name,repository:$i.repository,revision:$i.revision,
-        servedName:($r|arg("--served-model-name") // $i.repository), weightFormat:$i.weights.format,
+        servedName:($r|arg("--served-model-name") // $i.served_name // $i.repository), weightFormat:$i.weights.format,
         weightPrecision:$i.weights.precision,downloadBytes:((($i.weights.size_gb // 0)*1073741824)|floor)},
       compatibility:{acceleratorBackend:$h.accelerator_backend,acceleratorCount:$r.hardware_count,
         hardwareId:$h.id,minimumMemoryBytesEach:(($h.memory.vram_gb // 0)*1073741824)},
@@ -124,6 +124,7 @@ resolved_recipe() {
     select(.status == "validated" and .launch.adapter == "docker.openai-v1")
     | select(.launch.image | test("@sha256:[0-9a-f]{64}$"))
     | select(.model.revision | test("^[0-9a-f]{40,64}$"))
+    | select(.model.downloadBytes > 0)
     | select(([.launch.arguments[]? | select(test("disable.*cuda.*graph|enforce.eager"; "i"))] | length) == 0)
   ') || { fail "registry recipe $id is not safe to launch"; return; }
   while IFS= read -r source; do
@@ -206,6 +207,43 @@ plan_json() {
   printf '%s\0' "${argv[@]}" | jq -Rs --argjson recipe "$recipe" --argjson port "$AI_PORT" '{recipe:$recipe,port:$port,argv:(split("\u0000")[:-1])}'
 }
 
+download_plan_json() {
+  local recipe=$1 image repository revision served source target file pull fetch
+  image=$(jq -r '.launch.image' <<<"$recipe")
+  repository=$(jq -r '.model.repository' <<<"$recipe")
+  revision=$(jq -r '.model.revision' <<<"$recipe")
+  served=$(jq -r '.model.servedName' <<<"$recipe")
+  local -a pull_argv=(docker pull "$image")
+  local -a fetch_argv=(docker run --rm --label io.omarchy.local-ai.download=1 --entrypoint hf)
+  while IFS=$'\t' read -r source target; do
+    [[ -n $source && -n $target && $source != /dev/dri/by-path ]] || continue
+    if [[ $source == \~/* ]]; then source=${source/#\~/$AI_USER_HOME}; elif [[ $source != /* ]]; then source="$AI_REGISTRY_REPO/$source"; fi
+    [[ $source == "$AI_USER_HOME/.cache/"* || $source == "$AI_REGISTRY_REPO/"* ]] || fail "registry cache mount is outside the local boundary"
+    mkdir -p "$source"; fetch_argv+=(--volume "$source:$target")
+  done < <(jq -r '.launch.mounts[]? | select(.target=="/models" or (.target|contains("huggingface"))) | [.source,.target] | @tsv' <<<"$recipe")
+  fetch_argv+=("$image" download "$repository" --revision "$revision")
+  if [[ $served == /models/* ]]; then
+    file=${served##*/}; fetch_argv+=("$file" --local-dir /models)
+  fi
+  pull=$(printf '%s\0' "${pull_argv[@]}" | jq -Rs 'split("\u0000")[:-1]')
+  fetch=$(printf '%s\0' "${fetch_argv[@]}" | jq -Rs 'split("\u0000")[:-1]')
+  jq -n --argjson pull "$pull" --argjson fetch "$fetch" '{pull:$pull,fetch:$fetch}'
+}
+
+download_recipe() {
+  local wanted=$1 recipe plan id
+  recipe=$(recipe_json "$wanted"); id=$(jq -r '.id' <<<"$recipe")
+  plan=$(download_plan_json "$recipe")
+  mapfile -t argv < <(jq -r '.pull[]' <<<"$plan"); "${argv[@]}"
+  if downloads_json "$(registry_snapshot_json)" | jq -e --arg id "$id" '.[]|select(.id==$id and .modelDownloaded and .imageDownloaded)' >/dev/null; then
+    printf 'downloaded · %s\n' "$(jq -r '.model.name' <<<"$recipe")"; return
+  fi
+  mapfile -t argv < <(jq -r '.fetch[]' <<<"$plan"); "${argv[@]}"
+  downloads_json "$(registry_snapshot_json)" | jq -e --arg id "$id" '.[]|select(.id==$id and .modelDownloaded and .imageDownloaded)' >/dev/null \
+    || fail "download finished but the registry-declared files are incomplete"
+  printf 'downloaded · %s\n' "$(jq -r '.model.name' <<<"$recipe")"
+}
+
 served_model() {
   curl -fsS --max-time 5 "http://127.0.0.1:$AI_PORT/v1/models" | jq -er '.data[0].id'
 }
@@ -226,7 +264,7 @@ accept_model() {
     sleep 5
   done
   reply=$(request_json "$recipe" "Reply with exactly: LOCAL_AI_READY") || return 1
-  jq -e '.choices[0].message.content // .choices[0].message.reasoning_content | length > 0' <<<"$reply" >/dev/null
+  jq -e '[(.choices[0].message.content // ""),(.choices[0].message.reasoning_content // "")]|join(" ")|contains("LOCAL_AI_READY")' <<<"$reply" >/dev/null
 }
 
 omp_yaml() {
@@ -272,13 +310,20 @@ record_usage() {
 }
 
 run_recipe() {
-  local wanted=$1 recipe plan old="${AI_CONTAINER}-previous" old_running=false reply
-  recipe=$(recipe_json "$wanted"); [[ $(jq -r '.ready' <<<"$recipe") == true ]] || fail "compatible hardware is currently busy"
-  plan=$(plan_json "$recipe")
+  local wanted=$1 recipe plan old="${AI_CONTAINER}-previous" old_running=false reply id
+  recipe=$(recipe_json "$wanted")
+  id=$(jq -r '.id' <<<"$recipe")
+  downloads_json "$(registry_snapshot_json)" | jq -e --arg id "$id" '.[]|select(.id==$id and .modelDownloaded and .imageDownloaded)' >/dev/null \
+    || fail "model is not downloaded; run download first"
   if docker inspect "$AI_CONTAINER" >/dev/null 2>&1; then
     [[ $(docker inspect -f '{{index .Config.Labels "io.omarchy.local-ai"}}' "$AI_CONTAINER") == 1 ]] || fail "$AI_CONTAINER exists but is not managed by this plugin"
     [[ $(docker inspect -f '{{.State.Running}}' "$AI_CONTAINER") == true ]] && old_running=true && docker stop "$AI_CONTAINER" >/dev/null
     docker rename "$AI_CONTAINER" "$old"
+  fi
+  recipe=$(recipe_json "$wanted")
+  if [[ $(jq -r '.ready' <<<"$recipe") != true ]] || ! plan=$(plan_json "$recipe"); then
+    if docker inspect "$old" >/dev/null 2>&1; then docker rename "$old" "$AI_CONTAINER"; $old_running && docker start "$AI_CONTAINER" >/dev/null; fi
+    fail "compatible hardware is currently busy; previous model restored"; return
   fi
   mapfile -t argv < <(jq -r '.argv[]' <<<"$plan")
   if ! "${argv[@]}" >/dev/null || ! accept_model "$recipe"; then
@@ -360,4 +405,10 @@ unwire_agents() {
     [[ -f $dir/settings.json ]] && tmp=$(mktemp "$dir/.settings.XXXXXX") && jq 'if .defaultProvider=="local" then del(.defaultProvider,.defaultModel) else . end' "$dir/settings.json" >"$tmp" && mv "$tmp" "$dir/settings.json"
   done
   omp_yaml del
+}
+
+unload_model() {
+  docker rm -f "$AI_CONTAINER" >/dev/null 2>&1 || true
+  rm -f "$AI_ACTIVE" "$AI_USER_HOME/.local/state/omarchy/agents/usage/local-ai.json"
+  unwire_agents; notify; echo 'unloaded · downloads kept'
 }

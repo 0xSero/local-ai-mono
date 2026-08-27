@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -euo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -33,6 +33,20 @@ assert jq -e '.argv|index("127.0.0.1:12434:30000") and index("device=0") and ind
 assert jq -e '[.argv[]|select(test("enforce.eager|disable.*cuda.*graph";"i"))]|length==0' >/dev/null <<<"$plan"
 ok 'launch plan is digest-pinned, loopback-only, and keeps CUDA graphs'
 
+download=$(download_plan_json "$recipe")
+assert jq -e '
+  .pull == ["docker","pull","image@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+  and (.fetch|index("--entrypoint")) and (.fetch|index("hf"))
+  and (.fetch|index("org/small")) and (.fetch|index("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
+  and ([.fetch[]|select(test("/root/.cache/huggingface"))]|length==1)
+' >/dev/null <<<"$download"
+ok 'download plan fetches the exact registry revision without starting a server'
+
+gguf=$(jq '.model.servedName="/models/model.gguf" | .launch.mounts=[{source:"~/.cache/models",target:"/models",read_only:false}]' <<<"$recipe")
+download=$(download_plan_json "$gguf")
+assert jq -e '(.fetch|index("model.gguf")) and (.fetch|index("--local-dir")) and (.fetch|index("/models"))' >/dev/null <<<"$download"
+ok 'GGUF downloads only the registry-declared file into the mounted model directory'
+
 jq '.launch.arguments += ["--enforce-eager"]' "$OMARCHY_AI_REGISTRY/recipe/small-3090.json" >"$TMP/bad"; mv "$TMP/bad" "$OMARCHY_AI_REGISTRY/recipe/small-3090.json"
 if resolved_recipe small-3090 "$(hardware_with_registry)" >/dev/null 2>&1; then printf 'not ok - unsafe registry recipe accepted\n' >&2; exit 1; fi
 ok 'unsafe registry launch arguments are refused'
@@ -43,14 +57,56 @@ assert jq -e 'length==1 and .[0].model=="Small Registry Model" and .[0].modelDow
 ok 'download state follows registry-declared cache mounts'
 
 served_model() { printf 'org/small\n'; }
+request_json() { jq -nc '{choices:[{message:{content:"LOCAL_AI_READY"}}]}'; }
+assert accept_model "$recipe"
+request_json() { jq -nc '{choices:[{message:{content:"wrong reply"}}]}'; }
+if accept_model "$recipe"; then printf 'not ok - invalid readiness reply accepted\n' >&2; exit 1; fi
+ok 'acceptance requires the requested readiness proof'
+
 wire_agents "$(recipe_json small)"
 assert jq -e '.providers.local.baseUrl=="http://127.0.0.1:12434/v1" and (.providers.local.models[0]|has("maxTokens")|not)' "$OMARCHY_AI_USER_HOME/.omp/agent/models.json" >/dev/null
 assert ruby -ryaml -e 'd=YAML.safe_load(File.read(ARGV[0])); abort unless d.dig("modelRoles","default")=="omarchy-local/org/small"' "$OMARCHY_AI_USER_HOME/.omp/agent/config.yml"
 unwire_agents; ok 'OMP and Pi wiring is minimal and reversible'
 
+(
+  calls="$TMP/switch-calls"
+  recipe_json() { jq -nc '{id:"small-3090",ready:true,model:{name:"Small Registry Model"}}'; }
+  registry_snapshot_json() { printf '{}\n'; }
+  downloads_json() { jq -nc '[{id:"small-3090",modelDownloaded:true,imageDownloaded:true}]'; }
+  plan_json() { jq -nc '{argv:["true"]}'; }
+  accept_model() { return 1; }
+  docker() {
+    printf '%s\n' "$*" >>"$calls"
+    if [[ $1 == inspect && ${2:-} == -f ]]; then [[ $3 == *Labels* ]] && echo 1 || echo true; fi
+    return 0
+  }
+  set +e; run_recipe small >/dev/null 2>&1; switch_rc=$?; set -e
+  [[ $switch_rc -ne 0 ]] || { printf 'not ok - failed switch reported success\n' >&2; exit 1; }
+  assert grep -q '^stop omarchy-local-ai$' "$calls"
+  assert grep -q '^rename omarchy-local-ai omarchy-local-ai-previous$' "$calls"
+  assert grep -q '^rename omarchy-local-ai-previous omarchy-local-ai$' "$calls"
+  assert grep -q '^start omarchy-local-ai$' "$calls"
+)
+ok 'failed switch restores and restarts the previous managed model'
+
 assert jq -e '.id=="sero.local-ai" and .entryPoints.barWidget=="Panel.qml"' "$ROOT/manifest.json" >/dev/null
 if grep -Eq 'Qwen|Gemma|LFM|Ornith|#[0-9A-Fa-f]{6}' "$ROOT/Panel.qml"; then printf 'not ok - panel embeds catalog data or fixed colors\n' >&2; exit 1; fi
-ok 'theme-native panel contains no invented models'
+assert grep -q 'WidgetButton {' "$ROOT/Panel.qml"
+if grep -Eq 'BarIconButton|Rectangle[[:space:]]*\{' "$ROOT/Panel.qml"; then printf 'not ok - panel contains custom icon or card chrome\n' >&2; exit 1; fi
+for label in 'Scan' 'Download' 'Run' 'Unload' 'Open agent' 'Switch running model'; do assert grep -q "$label" "$ROOT/Panel.qml"; done
+ok 'theme-native panel is text-only and exposes the six lifecycle actions'
+
+help=$("$ROOT/bin/omarchy-local-ai" --help)
+for command in scan download run unload open-agent switch; do assert grep -q "$command" <<<"$help"; done
+ok 'CLI presents the same six-action contract as the panel'
+
+docker() { return 1; }
+flock() { return 0; }
+export -f docker flock
+scan=$("$ROOT/bin/omarchy-local-ai" scan 2>/dev/null)
+assert jq -e '.models[0].name=="Small Registry Model" and .hardware.groups[0].count==4 and .status.ready==false' >/dev/null <<<"$scan"
+unset -f docker flock
+ok 'scan integrates registry, mocked hardware, downloads, and runtime state without GPU access'
 
 for file in "$ROOT"/bin/* "$ROOT"/lib/*.sh "$ROOT"/test/all; do bash -n "$file"; done
 lines=$(find "$ROOT" -type f -not -path '*/.git/*' -not -name '.DS_Store' -print0 | xargs -0 wc -l | tail -1 | awk '{print $1}')

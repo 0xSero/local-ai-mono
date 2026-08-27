@@ -1,7 +1,7 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # omarchy:summary=Run validated registry models on detected local hardware
-# omarchy:args=<sync|hardware|models|run|status|downloads|task|benchmark|start|stop|logs|remove>
+# omarchy:args=<scan|download|run|unload|open-agent|switch>
 
 set -euo pipefail
 AI_ROOT=$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
@@ -10,30 +10,23 @@ source "$AI_ROOT/lib/core.sh"
 usage() {
   echo 'Usage: omarchy-local-ai <command>
 
-  sync                  clone or fast-forward ~/omarchy/local-ai
-  hardware [--json]     show detected accelerators
-  models [--json]       list every registry model and compatibility
-  run [model|recipe]    choose and serve one compatible model
-  status [--json]       show readiness
-  downloads [--json]    show image and model cache state
-  task [prompt]         give the active model a real task
-  benchmark             measure live output throughput
-  start | stop | logs   control the active model
-  remove                remove runtime and agent wiring; keep downloads'
+  scan                   refresh registry and scan hardware
+  download <model>       download one registry model
+  run <model>            load one downloaded model
+  unload                 free hardware; keep downloads
+  open-agent             open the Omarchy agent picker
+  switch <model>         atomically replace the running model'
 }
 
 command=${1:-help}; shift || true
+if [[ $command =~ ^(scan|download|run|unload|switch)$ ]]; then
+  mkdir -p "$AI_STATE"; exec 9>"$AI_STATE/operation.lock"
+  flock -n 9 || fail "another local AI operation is running"
+fi
 case "$command" in
-  sync) sync_registry ;;
-  hardware)
-    data=$(hardware_json)
-    if [[ ${1:-} == --json ]]; then jq . <<<"$data"; else jq -r '.groups[]|"\(.count)× \(.product) · \(.memoryBytesEach/1073741824|floor) GB each"' <<<"$data"; fi
-    ;;
-  models)
-    data=$(registry_snapshot_json)
-    if [[ ${1:-} == --json ]]; then jq '.models' <<<"$data"; else jq -r '.models[]|(.id + " · " + (if .ready then "ready" elif .compatible then "busy" else "other hardware" end) + " · " + .precision + " · " + .engine)' <<<"$data"; fi
-    ;;
+  scan) sync_registry >&2; snapshot_json ;;
   snapshot) snapshot_json ;;
+  download) [[ -n ${1:-} ]] || fail 'choose a model'; download_recipe "$1" ;;
   run)
     wanted=${1:-}
     if [[ -z $wanted ]]; then
@@ -42,6 +35,9 @@ case "$command" in
     fi
     [[ -n $wanted ]] && run_recipe "$wanted"
     ;;
+  switch) [[ -n ${1:-} ]] || fail 'choose a model'; run_recipe "$1" ;;
+  unload) unload_model ;;
+  open-agent) exec omarchy-agent --pick ;;
   status)
     data=$(status_json)
     if [[ ${1:-} == --json ]]; then jq . <<<"$data"; else jq -r '"\(.state)" + (if .model then " · \(.model) · 127.0.0.1:\(.port)" else "" end)' <<<"$data"; fi
@@ -52,14 +48,6 @@ case "$command" in
     ;;
   task) task_model "$*" ;;
   benchmark) benchmark_model ;;
-  start) docker start "$AI_CONTAINER" >/dev/null; notify; status_json ;;
-  stop) docker stop "$AI_CONTAINER" >/dev/null; notify; status_json ;;
-  logs) exec docker logs --tail 100 --follow "$AI_CONTAINER" ;;
-  remove)
-    docker rm -f "$AI_CONTAINER" >/dev/null 2>&1 || true
-    rm -f "$AI_ACTIVE" "$HOME/.local/state/omarchy/agents/usage/local-ai.json"
-    unwire_agents; notify; echo 'removed · downloads kept'
-    ;;
   help|-h|--help) usage ;;
   *) usage >&2; exit 2 ;;
 esac

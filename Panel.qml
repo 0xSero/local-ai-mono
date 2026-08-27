@@ -10,60 +10,72 @@ Panel {
   ipcTarget: "sero.local-ai"
   manageIpc: false
 
-  property var data: ({ models: [], hardware: { groups: [] }, registry: {}, status: { state: "loading" } })
+  property var data: ({ models: [], status: { state: "loading" } })
+  property string page: "home"
+  property string selectedId: ""
   property int cursor: 0
-  property bool keyboardCursor: false
-  property bool loading: false
+  property string busy: ""
+  property string afterAction: ""
   property string errorText: ""
+  property string lastFailure: ""
 
   readonly property string sourceDir: String(Qt.resolvedUrl(".")).replace(/^file:\/\//, "").replace(/\/$/, "")
   readonly property string cli: sourceDir + "/bin/omarchy-local-ai"
   readonly property var models: data.models || []
-  readonly property var hardware: data.hardware && data.hardware.groups ? data.hardware.groups : []
   readonly property var status: data.status || {}
   readonly property color foreground: bar ? bar.foreground : Color.foreground
-  readonly property color dim: Util.alpha(foreground, 0.56)
-  readonly property color faint: Util.alpha(foreground, 0.13)
-  readonly property color hover: bar ? Style.hoverFillFor(foreground, Color.accent) : "transparent"
+  readonly property color dim: Util.alpha(foreground, 0.55)
 
-  function shortHardware(name) {
-    return String(name || "GPU").replace("NVIDIA GeForce ", "").replace("Intel ", "")
-  }
-  function hardwareLine() {
-    return hardware.map(function(h) { return h.count + "× " + shortHardware(h.product) }).join("   ·   ")
-  }
-  function stateLabel(model) {
-    if (model.active && status.ready) return "RUNNING"
-    if (model.active && status.running) return "LOADING"
-    if (model.downloaded) return "LOCAL"
-    return model.ready ? "READY" : "BUSY"
+  function selectedModel() {
+    for (var i = 0; i < models.length; i++) if (models[i].recipeId === selectedId) return models[i]
+    return models.length > 0 ? models[Math.min(cursor, models.length - 1)] : null
   }
   function refresh() {
-    if (sourceDir === "" || snapshot.running) return
-    loading = true
-    snapshot.running = true
+    if (sourceDir !== "" && !snapshot.running) snapshot.running = true
   }
-  function select(delta) {
+  function choose(index) {
     if (models.length === 0) return
-    cursor = ((cursor + delta) % models.length + models.length) % models.length
+    cursor = ((index % models.length) + models.length) % models.length
+    selectedId = models[cursor].recipeId
   }
-  function runModel(model) {
-    if (!model || model.ready !== true || model.active || !bar) return
+  function showModels() {
+    page = "models"
+    choose(cursor)
+  }
+  function showModel(model) {
+    if (!model) return
+    selectedId = model.recipeId
+    page = "model"
+  }
+  function runAction(label, args, nextPage) {
+    if (busy !== "" || action.running) return
+    busy = label
+    afterAction = nextPage
+    errorText = ""
+    lastFailure = ""
+    action.command = [cli].concat(args)
+    action.running = true
+  }
+  function primary() {
+    var model = selectedModel()
+    if (!model || (model.active && status.running)) return
+    if (!model.downloaded) runAction("Downloading", ["download", model.recipeId], "model")
+    else if (status.running) runAction("Switching", ["switch", model.recipeId], "home")
+    else runAction("Loading", ["run", model.recipeId], "home")
+  }
+  function openAgent() {
     close()
-    bar.run("omarchy-launch-floating-terminal-with-presentation " + Util.shellQuote(cli + " run " + model.recipeId))
+    if (bar) bar.run("omarchy-agent --pick")
   }
-  function lifecycle() {
-    var action = status.running ? "stop" : "start"
-    if (!status.recipeId) return
-    control.command = [cli, action]
-    control.running = true
-  }
-  function syncRegistry() {
-    close()
-    if (bar) bar.run("omarchy-launch-floating-terminal-with-presentation " + Util.shellQuote(cli + " sync"))
+  function activate() {
+    if (busy !== "") return
+    if (page === "models") showModel(selectedModel())
+    else if (page === "model") primary()
+    else if (status.ready) openAgent()
+    else showModels()
   }
 
-  onOpenedChanged: if (opened) { keyboardCursor = false; refresh() }
+  onOpenedChanged: if (opened) { page = "home"; errorText = ""; refresh() }
 
   Process {
     id: snapshot
@@ -71,10 +83,9 @@ Panel {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        root.loading = false
         try {
           root.data = JSON.parse(text)
-          root.errorText = ""
+          if (root.errorText === "Registry unavailable") root.errorText = ""
           if (root.cursor >= root.models.length) root.cursor = Math.max(0, root.models.length - 1)
         } catch (e) {
           root.errorText = "Registry unavailable"
@@ -83,23 +94,34 @@ Panel {
     }
   }
 
-  Process { id: control; onExited: root.refresh() }
-  Timer { interval: 30000; running: true; repeat: true; triggeredOnStart: true; onTriggered: root.refresh() }
-  Timer { interval: 4000; running: root.opened; repeat: true; onTriggered: root.refresh() }
+  Process {
+    id: action
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.lastFailure = text.trim().replace(/^local-ai:\s*/, "")
+    }
+    onExited: function(exitCode) {
+      var next = root.afterAction
+      root.busy = ""
+      if (exitCode === 0) root.page = next
+      else root.errorText = root.lastFailure || "That action did not finish"
+      root.refresh()
+    }
+  }
 
-  BarIconButton {
+  Timer { interval: 30000; running: true; repeat: true; triggeredOnStart: true; onTriggered: root.refresh() }
+  Timer { interval: 5000; running: root.opened; repeat: true; onTriggered: root.refresh() }
+
+  WidgetButton {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: "󰚩"
-    slotSize: Style.bar.statusSlot
+    text: "AI"
     fontSize: Style.font.caption
-    opacity: root.status.ready ? 1 : 0.58
-    tooltipText: root.status.ready ? "Local AI · " + root.status.model : "Local AI · registry"
-    onPressed: function(mouseButton) {
-      if (mouseButton === Qt.RightButton && root.status.recipeId) root.lifecycle()
-      else root.toggle()
-    }
+    dimmed: !root.status.ready
+    tooltipText: root.status.ready ? "Local AI · " + root.status.model : "Local AI"
+    onPressed: root.toggle()
   }
 
   KeyboardPanel {
@@ -109,14 +131,14 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keys
-    contentWidth: panel.fittedContentWidth(Style.space(360))
+    contentWidth: panel.fittedContentWidth(Style.space(292))
     contentHeight: panel.fittedContentHeight(content.implicitHeight)
 
     PanelKeyCatcher {
       id: keys
       anchors.fill: parent
-      onMoveRequested: function(dx, dy) { root.keyboardCursor = true; root.select(dy !== 0 ? dy : dx) }
-      onActivateRequested: root.runModel(root.models[root.cursor])
+      onMoveRequested: function(dx, dy) { if (root.page === "models") root.choose(root.cursor + (dy !== 0 ? dy : dx)) }
+      onActivateRequested: root.activate()
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
 
@@ -124,215 +146,134 @@ Panel {
         id: content
         anchors.left: parent.left
         anchors.right: parent.right
-        spacing: Style.space(12)
+        spacing: Style.space(14)
 
-        Row {
+        Column {
           width: parent.width
-          spacing: Style.space(10)
+          spacing: Style.space(3)
 
-          Column {
-            width: parent.width - headerAction.implicitWidth - parent.spacing
-            spacing: Style.space(2)
-            Text {
-              text: "Local AI"
-              color: root.foreground
-              font.family: root.bar.fontFamily
-              font.pixelSize: Style.font.title
-              font.bold: true
-            }
-            Text {
-              width: parent.width
-              text: root.hardwareLine()
-              color: root.dim
-              font.family: root.bar.fontFamily
-              font.pixelSize: Style.font.caption
-              elide: Text.ElideRight
-            }
-          }
-
-          Button {
-            id: headerAction
-            text: root.status.running ? "Stop" : "Start"
-            foreground: root.foreground
-            fontFamily: root.bar.fontFamily
-            bordered: true
-            enabled: Boolean(root.status.recipeId)
-            opacity: enabled ? 1 : 0.4
-            onClicked: root.lifecycle()
-          }
-        }
-
-        Rectangle {
-          width: parent.width
-          implicitHeight: activeContent.implicitHeight + Style.space(20)
-          radius: Style.cornerRadius
-          color: root.faint
-          visible: Boolean(root.status.recipeId)
-
-          Column {
-            id: activeContent
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.margins: Style.space(10)
-            spacing: Style.space(4)
-
-            Row {
-              width: parent.width
-              Text {
-                width: parent.width - activeState.implicitWidth
-                text: root.status.model || "Local model"
-                color: root.foreground
-                font.family: root.bar.fontFamily
-                font.pixelSize: Style.font.body
-                font.bold: true
-                elide: Text.ElideRight
-              }
-              Text {
-                id: activeState
-                text: String(root.status.state || "stopped").toUpperCase()
-                color: root.status.ready ? root.foreground : root.dim
-                font.family: root.bar.fontFamily
-                font.pixelSize: Style.font.caption
-                font.letterSpacing: 1
-              }
-            }
-
-            Text {
-              width: parent.width
-              text: (root.status.engine || "engine") + "  ·  127.0.0.1:" + (root.status.port || "—") + (root.data.benchmark ? "  ·  " + Number(root.data.benchmark.medianTokensPerSecond).toFixed(1) + " tok/s live" : "")
-              color: root.dim
-              font.family: root.bar.fontFamily
-              font.pixelSize: Style.font.caption
-              elide: Text.ElideRight
-            }
-          }
-        }
-
-        Row {
-          width: parent.width
           Text {
-            width: parent.width - modelCount.implicitWidth
-            text: "MODELS"
-            color: root.dim
+            width: parent.width
+            text: root.busy !== "" ? root.busy
+              : root.page === "models" ? "Choose a model"
+              : root.page === "model" && root.selectedModel() ? root.selectedModel().name
+              : root.status.model || "Local AI"
+            color: root.foreground
             font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.caption
-            font.letterSpacing: 1
+            font.pixelSize: Style.font.title
+            font.bold: true
+            elide: Text.ElideRight
           }
+
           Text {
-            id: modelCount
-            text: root.models.length
-            color: root.dim
+            width: parent.width
+            text: root.busy !== "" ? "This can keep working with the panel closed"
+              : root.errorText !== "" ? root.errorText
+              : root.page === "models" ? (root.models.length > 0 ? "From ~/omarchy/local-ai" : "No models match this machine")
+              : root.page === "model" && root.selectedModel()
+                ? (root.selectedModel().active ? "Running"
+                  : root.selectedModel().downloaded ? "Downloaded · " + root.selectedModel().precision
+                  : root.selectedModel().precision + " · ready to download")
+              : root.status.ready
+                ? "Ready" + (root.data.benchmark ? " · " + Number(root.data.benchmark.medianTokensPerSecond).toFixed(1) + " tok/s" : "")
+              : root.status.running ? "Loading" : "Nothing running"
+            color: root.errorText !== "" ? root.foreground : root.dim
             font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.caption
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
           }
         }
 
-        PanelSeparator { foreground: root.foreground; strength: 0.2 }
-
-        Text {
+        Column {
           width: parent.width
-          visible: root.errorText !== "" || (!root.loading && root.models.length === 0)
-          text: root.errorText !== "" ? root.errorText : "No validated recipes match this hardware."
-          color: root.dim
-          font.family: root.bar.fontFamily
-          font.pixelSize: Style.font.bodySmall
-          wrapMode: Text.WordWrap
+          spacing: Style.space(11)
+          visible: root.busy === "" && root.page === "home"
+
+          ActionLink { text: "Open agent"; enabled: root.status.ready; onTriggered: root.openAgent() }
+          ActionLink { text: "Change model"; onTriggered: root.showModels() }
+          ActionLink { text: "Unload"; visible: Boolean(root.status.recipeId); onTriggered: root.runAction("Unloading", ["unload"], "home") }
+          ActionLink { text: "Scan"; onTriggered: root.runAction("Scanning", ["scan"], "models") }
         }
 
-        Repeater {
-          model: root.models
-          Rectangle {
-            required property var modelData
-            required property int index
-            width: content.width
-            implicitHeight: modelRow.implicitHeight + Style.space(14)
-            radius: Style.cornerRadius
-            color: root.keyboardCursor && root.cursor === index ? root.hover : "transparent"
-            opacity: modelData.ready || modelData.active ? 1 : 0.42
+        Column {
+          width: parent.width
+          spacing: Style.space(11)
+          visible: root.busy === "" && root.page === "models"
 
-            MouseArea {
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: modelData.ready && !modelData.active ? Qt.PointingHandCursor : Qt.ArrowCursor
-              onEntered: { root.cursor = index; root.keyboardCursor = true }
-              onClicked: root.runModel(modelData)
-            }
+          Repeater {
+            model: root.models
+            Item {
+              required property var modelData
+              required property int index
+              width: content.width
+              height: modelName.implicitHeight
 
-            Row {
-              id: modelRow
-              anchors.left: parent.left
-              anchors.right: parent.right
-              anchors.verticalCenter: parent.verticalCenter
-              anchors.leftMargin: Style.space(6)
-              anchors.rightMargin: Style.space(6)
-              spacing: Style.space(10)
-
-              Column {
-                width: parent.width - rowState.implicitWidth - parent.spacing
-                spacing: Style.space(2)
+              Row {
+                width: parent.width
+                spacing: Style.space(10)
                 Text {
-                  width: parent.width
+                  id: modelName
+                  width: parent.width - modelState.implicitWidth - parent.spacing
                   text: modelData.name
-                  color: root.foreground
+                  color: root.cursor === index ? root.foreground : root.dim
                   font.family: root.bar.fontFamily
                   font.pixelSize: Style.font.bodySmall
-                  font.bold: modelData.active
                   elide: Text.ElideRight
                 }
                 Text {
-                  width: parent.width
-                  text: modelData.precision + "  ·  " + modelData.engine + "  ·  " + modelData.acceleratorCount + "× " + root.shortHardware(modelData.hardware)
+                  id: modelState
+                  text: modelData.active ? root.status.state : modelData.downloaded ? "downloaded" : "download"
                   color: root.dim
                   font.family: root.bar.fontFamily
                   font.pixelSize: Style.font.caption
-                  elide: Text.ElideRight
                 }
               }
 
-              Text {
-                id: rowState
-                anchors.verticalCenter: parent.verticalCenter
-                text: root.stateLabel(modelData)
-                color: modelData.active ? root.foreground : root.dim
-                font.family: root.bar.fontFamily
-                font.pixelSize: Style.font.caption
-                font.letterSpacing: 0.7
+              MouseArea {
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onEntered: root.choose(index)
+                onClicked: root.showModel(modelData)
               }
             }
           }
+
+          ActionLink { text: "Scan again"; onTriggered: root.runAction("Scanning", ["scan"], "models") }
+          ActionLink { text: "Back"; onTriggered: root.page = "home" }
         }
 
-        PanelSeparator { foreground: root.foreground; strength: 0.2 }
-
-        Row {
+        Column {
           width: parent.width
-          spacing: Style.space(8)
-          Text {
-            width: parent.width - syncLink.implicitWidth - parent.spacing
-            text: "0xSero/local-ai-registry  ·  " + (root.data.registry.totalRecipeCount || 0) + " recipes"
-            color: root.dim
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.caption
-            elide: Text.ElideRight
+          spacing: Style.space(11)
+          visible: root.busy === "" && root.page === "model"
+
+          ActionLink {
+            visible: root.selectedModel() && (!root.selectedModel().active || !root.status.running)
+            enabled: root.selectedModel() && (!root.selectedModel().downloaded || root.selectedModel().ready || root.status.running)
+            text: root.selectedModel() && !root.selectedModel().downloaded ? "Download"
+              : root.status.running ? "Switch running model" : "Run"
+            onTriggered: root.primary()
           }
-          Text {
-            id: syncLink
-            text: "SYNC"
-            color: syncArea.containsMouse ? root.foreground : root.dim
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.caption
-            font.letterSpacing: 0.8
-            MouseArea {
-              id: syncArea
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.syncRegistry()
-            }
-          }
+          ActionLink { text: "Open agent"; visible: root.selectedModel() && root.selectedModel().active && root.status.ready; onTriggered: root.openAgent() }
+          ActionLink { text: "Back"; onTriggered: root.page = "models" }
         }
       }
+    }
+  }
+
+  component ActionLink: Text {
+    signal triggered()
+    color: enabled ? root.foreground : root.dim
+    opacity: enabled ? 1 : 0.35
+    font.family: root.bar.fontFamily
+    font.pixelSize: Style.font.bodySmall
+    MouseArea {
+      anchors.fill: parent
+      enabled: parent.enabled
+      hoverEnabled: true
+      cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+      onClicked: parent.triggered()
     }
   }
 }
