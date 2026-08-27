@@ -184,10 +184,10 @@ Panel {
               wrapMode: Text.WordWrap
             }
 
-            MetaText { visible: root.busy === "" && root.page === "home" && root.status.ready; text: "Running locally" }
+            MetaText { visible: root.busy === "" && root.page === "home" && Boolean(root.status.ready); text: "Running locally" }
 
             MetaText {
-              visible: root.busy === "" && root.page === "home" && root.status.ready && Boolean(root.data.benchmark)
+              visible: root.busy === "" && root.page === "home" && Boolean(root.status.ready) && Boolean(root.data.benchmark)
               text: Number(root.data.benchmark ? root.data.benchmark.medianTokensPerSecond : 0).toFixed(1) + " tok/s"
             }
           }
