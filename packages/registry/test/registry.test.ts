@@ -3,11 +3,15 @@ import test from "node:test"
 
 import {
   collectionCounts,
+  getBenchmark,
+  getBenchmarkRun,
   getEntityDetail,
   getCompatibilityResult,
   getFacets,
   isLaunchable,
   listHardware,
+  listBenchmarkRuns,
+  listBenchmarks,
   marketPriceCount,
   listModelInstances,
   listModels,
@@ -15,6 +19,33 @@ import {
   listSpeedSweeps,
   queryCompatibility,
 } from "../src/index"
+
+test("benchmark catalog exposes definitions and sourced model-instance scores", () => {
+  const counts = collectionCounts()
+  const benchmarks = listBenchmarks({}, { limit: 100, offset: 0 })
+  const runs = listBenchmarkRuns({}, { limit: 2_000, offset: 0 })
+
+  assert.equal(counts.benchmark, 100)
+  assert.equal(benchmarks.total, 100)
+  assert.equal(runs.total, counts.benchmark_run)
+  assert.ok(runs.total > 1_000)
+  assert.ok(benchmarks.data.every((benchmark) => benchmark.command.includes(benchmark.id)))
+})
+
+test("benchmark filters and inheritance semantics remain explicit", () => {
+  const available = listBenchmarks({ min_model_count: "10", runner_status: "available" }, { limit: 100, offset: 0 })
+  assert.ok(available.total > 0)
+  assert.ok(available.data.every((benchmark) => benchmark.coverage.model_count >= 10 && benchmark.runner.status === "available"))
+
+  const direct = listBenchmarkRuns({ score_origin: "direct" }, { limit: 1, offset: 0 }).data[0]
+  const inherited = listBenchmarkRuns({ score_origin: "inherited" }, { limit: 1, offset: 0 }).data[0]
+  assert.ok(direct)
+  assert.ok(inherited)
+  assert.equal(direct.inherited_from, null)
+  assert.ok(inherited.inherited_from)
+  assert.ok(getBenchmark(direct.benchmark_id))
+  assert.ok(getBenchmarkRun(direct.id))
+})
 
 test("model and hardware searches intersect on compatible recipes", () => {
   const result = queryCompatibility(
@@ -208,10 +239,10 @@ test("Prices topic exposes regional market records without flattening currencies
   const prices = listPrices({}, { limit: 200, offset: 0 })
   const facets = getFacets()
 
-  assert.equal(prices.total, 85)
-  assert.equal(prices.data.length, 85)
-  assert.equal(new Set(prices.data.map((record) => record.product.id)).size, 34)
-  assert.equal(prices.data.reduce((count, record) => count + record.observations.length, 0), 898)
+  assert.equal(prices.total, 84)
+  assert.equal(prices.data.length, 84)
+  assert.equal(new Set(prices.data.map((record) => record.product.id)).size, 33)
+  assert.equal(prices.data.reduce((count, record) => count + record.observations.length, 0), 896)
   assert.ok(prices.data.every((record) => record.observations.every((observation) => observation.currency === record.region.currency)))
   assert.deepEqual(facets.prices.region, ["DE", "GB", "JP", "PL", "US"])
   assert.deepEqual(facets.prices.currency, ["EUR", "GBP", "JPY", "PLN", "USD"])
