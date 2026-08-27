@@ -249,9 +249,9 @@ status_json() {
 
 downloads_json() {
   local snapshot; snapshot=$(snapshot_json)
-  jq -c '.recipes[]|select(.compatible)|[.id,.model.id,.model.downloadBytes,.launch.image]|@tsv' <<<"$snapshot" | while IFS=$'\t' read -r id model expected image; do
+  jq -r '.recipes[]|select(.compatible)|[.id,.model.id,.model.downloadBytes,.launch.image]|@tsv' <<<"$snapshot" | while IFS=$'\t' read -r id model expected image; do
     local bytes=0 image_ready=false model_ready=false path="$AI_CACHE/models/$id"
-    [[ -d $path ]] && bytes=$(du -sb "$path" | cut -f1)
+    [[ -d $path ]] && bytes=$(du -sk "$path" | awk '{print $1 * 1024}')
     docker image inspect "$image" >/dev/null 2>&1 && image_ready=true
     ((expected == 0 || bytes * 100 >= expected * 95)) && model_ready=true
     jq -nc --arg id "$id" --arg model "$model" --argjson expected "$expected" --argjson bytes "$bytes" \

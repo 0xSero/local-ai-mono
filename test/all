@@ -49,6 +49,10 @@ assert jq -e '.argv|index("127.0.0.1:12434:30000") and index("device=0") and ind
 if jq -r '.argv[]' <<<"$plan" | grep -Eqi 'enforce.eager|disable.*cuda.*graph'; then exit 1; fi
 ok 'plan is loopback-only, pins one GPU, and preserves graph mode'
 
+downloads=$(downloads_json)
+assert jq -e 'length==1 and .[0].model=="small" and .[0].localBytes==0 and .[0].modelDownloaded==false' >/dev/null <<<"$downloads"
+ok 'download state is valid JSON for every compatible recipe'
+
 wire_agents "$recipe"
 assert jq -e '.providers.local.baseUrl=="http://127.0.0.1:12434/v1" and (.providers.local.models[0]|has("maxTokens")|not)' "$HOME/.omp/agent/models.json" >/dev/null
 assert jq -e '.defaultProvider=="local" and .defaultModel=="org/small"' "$HOME/.omp/agent/settings.json" >/dev/null
