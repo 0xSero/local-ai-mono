@@ -312,6 +312,13 @@ wire_agents() {
 
 harness_bin() { [[ -x $AI_USER_HOME/.local/bin/$1 ]] && printf '%s\n' "$AI_USER_HOME/.local/bin/$1" || command -v "$1"; }
 
+launch_tui() {
+  local command encoded
+  printf -v command '%q ' omarchy-launch-tui --app-id=org.omarchy.agent "$@"
+  encoded=$(jq -Rn --arg command "$command" '$command')
+  hyprctl dispatch "hl.dsp.exec_cmd($encoded)" >/dev/null
+}
+
 claude_bridge() {
   local model config uvx deadline
   model=$(served_model); uvx=$(harness_bin uvx) || fail "uvx is required for Claude Code"
@@ -326,8 +333,8 @@ open_harness() {
   local name=${1:-} bin
   [[ $(jq -r .ready <<<"$(status_json)") == true ]] || fail "load a model first"
   case $name in
-    pi|omp) bin=$(harness_bin "$name") || fail "$name is not installed"; [[ $name == omp ]] && exec omarchy-launch-tui --app-id=org.omarchy.agent "$bin" --auto-approve || exec omarchy-launch-tui --app-id=org.omarchy.agent "$bin" ;;
-    claude) bin=$(harness_bin claude) || fail "Claude Code is not installed"; claude_bridge; exec omarchy-launch-tui --app-id=org.omarchy.agent env ANTHROPIC_BASE_URL=http://127.0.0.1:12435 ANTHROPIC_AUTH_TOKEN=local ANTHROPIC_MODEL=omarchy-local ANTHROPIC_SMALL_FAST_MODEL=omarchy-local CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 "$bin" --model omarchy-local ;;
+    pi|omp) bin=$(harness_bin "$name") || fail "$name is not installed"; [[ $name == omp ]] && launch_tui "$bin" --auto-approve || launch_tui "$bin" ;;
+    claude) bin=$(harness_bin claude) || fail "Claude Code is not installed"; claude_bridge; launch_tui env ANTHROPIC_BASE_URL=http://127.0.0.1:12435 ANTHROPIC_AUTH_TOKEN=local ANTHROPIC_MODEL=omarchy-local ANTHROPIC_SMALL_FAST_MODEL=omarchy-local CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 "$bin" --model omarchy-local ;;
     *) fail "choose pi, omp, or claude" ;;
   esac
 }
@@ -377,9 +384,9 @@ status_json() {
   recipe=$(active_recipe)
   [[ $(docker inspect -f '{{.State.Running}}' "$AI_CONTAINER" 2>/dev/null) == true ]] && running=true
   $running && served_model >/dev/null 2>&1 && ready=true
-  jq -n --arg model "$(jq -r '.model.name // .model.id' <<<"$recipe")" --arg recipe "$(jq -r '.id' <<<"$recipe")" \
-    --arg engine "$(jq -r '.engine.name' <<<"$recipe")" --argjson running "$running" --argjson ready "$ready" --argjson port "$AI_PORT" \
-    '{state:(if $ready then "ready" elif $running then "loading" else "stopped" end),ready:$ready,running:$running,model:$model,recipeId:$recipe,engine:$engine,port:$port}'
+  jq -n --arg model "$(jq -r '.model.name // .model.id' <<<"$recipe")" --arg recipe "$(jq -r '.id' <<<"$recipe")" --arg hardware "$(jq -r '.localProduct // .compatibility.hardwareId' <<<"$recipe")" \
+    --arg engine "$(jq -r '.engine.name' <<<"$recipe")" --argjson accelerators "$(jq -r '.compatibility.acceleratorCount' <<<"$recipe")" --argjson running "$running" --argjson ready "$ready" --argjson port "$AI_PORT" \
+    '{state:(if $ready then "ready" elif $running then "loading" else "stopped" end),ready:$ready,running:$running,model:$model,recipeId:$recipe,engine:$engine,hardware:$hardware,acceleratorCount:$accelerators,port:$port}'
 }
 
 downloads_json() {

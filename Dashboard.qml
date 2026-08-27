@@ -39,6 +39,7 @@ Item {
   function primary() { var m = selected(); if (!m) return; if (!m.downloaded) runAction("Downloading", ["download", m.recipeId]); else if (status.running) runAction("Switching", ["switch", m.recipeId]); else runAction("Loading", ["run", m.recipeId]) }
   function openAgent(name) { Quickshell.execDetached([cli, "open-agent", name]) }
   function modelState(m) { if (m.active) return "running"; if (busy === "Downloading" && selected() && selected().recipeId === m.recipeId) return "downloading"; return m.downloaded ? "downloaded" : m.ready ? "download" : "hardware busy" }
+  function activeHardware(g) { return status.running && (status.hardware === g.product || status.hardware === g.registryName) }
 
   Process { id: snapshot; command: [root.cli, "snapshot"]; stdout: StdioCollector { waitForEnd: true; onStreamFinished: { try { root.data = JSON.parse(text); root.errorText = ""; root.choose(root.selectedIndex) } catch (e) { root.errorText = "Registry unavailable" } } } }
   Process {
@@ -74,7 +75,7 @@ Item {
           Column {
             width: parent.width - headerActions.implicitWidth
             Text { text: "Local AI"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.iconLarge; font.weight: Font.Medium }
-            Meta { text: root.errorText || root.busy || (root.status.ready ? root.status.model + " · ready" : root.status.running ? "Model loading" : "Nothing running") }
+            Meta { text: root.errorText || root.busy || (root.status.ready ? root.status.model + " · " + root.status.acceleratorCount + " × " + root.status.hardware + " · ready" : root.status.running ? "Model loading" : "Nothing running") }
           }
           Row {
             id: headerActions; spacing: Style.space(16)
@@ -109,7 +110,7 @@ Item {
               Column {
                 required property var modelData; width: parent.width; spacing: Style.space(2)
                 Text { width: parent.width; text: modelData.count + " × " + (modelData.registryName || modelData.product); color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; wrapMode: Text.WordWrap }
-                Meta { text: Math.round(modelData.memoryBytesEach / 1073741824) + " GB each · " + modelData.backend }
+                Meta { text: Math.round(modelData.memoryBytesEach / 1073741824) + " GB each · " + modelData.backend + (root.activeHardware(modelData) ? " · running " + root.status.model : "") }
               }
             }
             Label { text: "REGISTRY"; topPadding: Style.space(8) }
