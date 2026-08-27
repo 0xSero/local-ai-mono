@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # omarchy:summary=Run validated registry models on detected local hardware
 # omarchy:args=<scan|download|run|unload|open-agent|switch>
-# One atomic snapshot is the UI contract; a locked worker advances state while preserving accepted .active state.
 set -euo pipefail
 HOME_DIR="${OMARCHY_AI_USER_HOME:-$HOME}"
 REPO="${OMARCHY_AI_REGISTRY_REPO:-$HOME_DIR/omarchy/local-ai}"
@@ -27,7 +26,7 @@ sw() { # sw <jq-filter> [jq-args...]
   jq -c "$@" --arg _now "$(date +%Y-%m-%dT%H:%M:%S%z)" "($f) | .updatedAt=\$_now" <<<"$(sread)" >"$SNAP.tmp.$$"
   mv "$SNAP.tmp.$$" "$SNAP"; sunlock
 }
-trace() { [[ -n ${OMARCHY_AI_TRACE:-} ]] && printf '%s\n' "$1" >>"$OMARCHY_AI_TRACE"; return 0; } # test-only transition log
+trace() { [[ -n ${OMARCHY_AI_TRACE:-} ]] && printf '%s\n' "$1" >>"$OMARCHY_AI_TRACE"; return 0; }
 setstate() { sw '.state=$s | .error=$e' --arg s "$1" --arg e "${2:-}"; trace "$1"; }
 op() { sw '.operation={name:$n,recipeId:$r,percent:($p|tonumber),indeterminate:$i,detail:$d}' \
   --arg n "$1" --arg r "$2" --arg p "$3" --argjson i "$4" --arg d "$5"; }
@@ -68,7 +67,7 @@ intel_arc_groups() {
   jq -nc --argjson d "$devices" --argjson c "$count" \
     '[{backend:"intel-xpu",product:"Intel Arc Pro B70",count:$c,memoryBytesEach:34359738368,devices:$d}]'
 }
-hardware_matched() { # annotate detected groups with registry hardware ids
+hardware_matched() {
   jq -c --slurpfile known <(jq -s '[.[]|{id,name,accelerator_backend,memory,aliases}]' "$REG"/hardware/*.json) '
     def norm: ascii_downcase|gsub("nvidia|geforce|intel|generation|workstation|edition|[0-9]+gb|[^a-z0-9]";"");
     .groups |= map(. as $g | ([$known[0][] | select(.accelerator_backend==$g.backend)
@@ -76,7 +75,7 @@ hardware_matched() { # annotate detected groups with registry hardware ids
       | select(((((.memory.vram_gb//0)*1024)-($g.memoryBytesEach/1048576))|fabs)<=1024)][0]) as $m
       | .+{registryId:($m.id//""),registryName:($m.name//"")})' <<<"$(hardware_json)"
 }
-resolve() { # resolve <recipe-id>
+resolve() {
   local id=$1 r i m h out src root; root=$(cd "$REG" && pwd)
   [[ -f $REG/recipe/$id.json ]] || { fail "unknown recipe $id"; return; }
   r=$(<"$REG/recipe/$id.json")
@@ -110,7 +109,7 @@ resolve() { # resolve <recipe-id>
   done < <(jq -r '.launch.mounts[]?.source' <<<"$out")
   printf '%s\n' "$out"
 }
-resolve_mount() { # <recipe> -> "hf"|"dir" TAB path: the standard HF cache, or a registry-mounted local dir (e.g. ~/.cache/inference-index/models/<name> at /models)
+resolve_mount() {
   local r=$1 src tgt
   while IFS=$'\t' read -r src tgt; do
     [[ $src == '~/.cache/huggingface' ]] && { printf 'hf\t%s\n' "$HOME_DIR/.cache/huggingface"; return; }
@@ -128,7 +127,7 @@ progress_bytes() { # bytes at the actual resolved model path, not the whole cach
 }
 image_have() { docker image inspect "$1" >/dev/null 2>&1; }
 hf_bin() { [[ -z ${OMARCHY_AI_NO_HOST_HF:-} ]] && bin_of hf 2>/dev/null; return 0; }
-weights_have() { # weights_have <recipe>; rejects .incomplete files and empty dirs
+weights_have() {
   local r=$1 repo rev exp kind base d b file
   repo=$(jq -r .model.repository <<<"$r"); rev=$(jq -r .model.revision <<<"$r"); exp=$(jq -r .model.bytes <<<"$r")
   read -r kind base < <(resolve_mount "$r")
@@ -152,7 +151,7 @@ weights_have() { # weights_have <recipe>; rejects .incomplete files and empty di
   (( exp == 0 )) && return 0
   (( b*100 >= exp*85 ))
 }
-catalog() { # catalog <hardware-json> -> models array
+catalog() {
   local hw=$1 ids id r rows='[]' bytes pct ind img wt
   ids=$(jq -c '[.groups[].registryId|select(length>0)]' <<<"$hw")
   while IFS= read -r id; do
@@ -180,13 +179,13 @@ gpus_json() { hardware_json | jq -c '[.groups[]| . as $g | .devices[]|{index,nam
 owned() { [[ $(docker inspect -f "{{index .Config.Labels \"$LABEL\"}}" "$1" 2>/dev/null) == 1 ]]; }
 exists() { docker inspect "$1" >/dev/null 2>&1; }
 running() { [[ $(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null) == true ]]; }
-gpu_ids() { # recipe -> comma separated device indices with most free VRAM
+gpu_ids() {
   hardware_json | jq -r --argjson need "$(jq -r .hardware.count <<<"$1")" \
     --arg id "$(jq -r .hardware.id <<<"$1")" --argjson hw "$(hardware_matched)" '
     [$hw.groups[]|select(.registryId==$id).product] as $p
     | [.groups[]|select(.product as $x|$p|index($x)).devices[]]|sort_by(-.freeMiB)|.[:$need]|map(.index)|join(",")'
 }
-build_argv() { # build_argv <recipe> ; prints NUL-separated argv
+build_argv() {
   local r=$1 root ids src tgt mode v backend root_real
   root_real=$(cd "$REG" && pwd)
   backend=$(jq -r .hardware.backend <<<"$r")
@@ -218,7 +217,7 @@ build_argv() { # build_argv <recipe> ; prints NUL-separated argv
 }
 api() { curl -fsS --max-time "${2:-30}" "http://127.0.0.1:$PORT/v1/$1"; }
 post() { curl -fsS --max-time 600 -H 'Content-Type: application/json' -d "$2" "http://127.0.0.1:$PORT/v1/$1"; }
-accept() { # accept <recipe> ; sets apiReady/servedModel/toolCallReady
+accept() {
   local r=$1 want served reply tools deadline=$((SECONDS+TIMEOUT))
   want=$(jq -r .model.servedName <<<"$r")
   while :; do
@@ -242,7 +241,7 @@ accept() { # accept <recipe> ; sets apiReady/servedModel/toolCallReady
   sw '.active.toolCallReady=true'
 }
 bin_of() { [[ -x $HOME_DIR/.local/bin/$1 ]] && printf '%s\n' "$HOME_DIR/.local/bin/$1" || command -v "$1"; }
-wire() { # wire <recipe> <served-model>
+wire() {
   local r=$1 model=$2 p d cur tmp
   p=$(jq -nc --arg u "http://127.0.0.1:$PORT/v1" --arg m "$model" --arg n "$(jq -r '.model.name//.model.id' <<<"$r")" \
     --argjson tools "$(jq -r '.capabilities.tools//false' <<<"$r")" \
@@ -283,12 +282,12 @@ open_agent() {
   [[ $name == omp ]] && launch_tui "$bin" --auto-approve --provider omarchy-local --model "$served" \
     || launch_tui "$bin" --provider omarchy-local --model "$served"
 }
-spawn() { # spawn <worker-subcommand> [args...] — detached; workers own the transition
+spawn() {
   if [[ ${OMARCHY_AI_FOREGROUND:-0} == 1 ]]; then "$SELF" "$@" >/dev/null 2>&1 || true; return; fi
   if command -v setsid >/dev/null 2>&1; then setsid "$SELF" "$@" >/dev/null 2>&1 </dev/null & disown
   else ( "$SELF" "$@" >/dev/null 2>&1 </dev/null & ) ; fi
 }
-guard() { # one operation at a time
+guard() {
   mkdir -p "$ST"
   if ((HAVE_FLOCK)); then exec 8>"$ST/op.lock"; flock -n 8 || { fail "another operation is running"; return 1; }
   else mkdir "$ST/op.lockd" 2>/dev/null || { fail "another operation is running"; return 1; }
@@ -350,7 +349,7 @@ w_refresh_models() {
   sw '.models=$m | .gpus=$g | .models|=map(.active=(.recipeId==$a))' \
     --argjson m "$(catalog "$hw")" --argjson g "$(gpus_json)" --arg a "$(sread | jq -r .active.recipeId)"
 }
-start_container() { # start_container <recipe> -> 0 ok
+start_container() {
   local r=$1; local -a argv=()
   while IFS= read -r -d '' v; do argv+=("$v"); done < <(build_argv "$r") || return 1
   ((${#argv[@]})) || return 1
@@ -362,14 +361,14 @@ start_container() { # start_container <recipe> -> 0 ok
     --argjson ids "$(jq -Rsc 'rtrimstr("\n")|split(",")|map(select(length>0)|tonumber)' <<<"$(gpu_ids "$r" 2>/dev/null || true)")"
   accept "$r"
 }
-restore_previous() { # restore_previous <was-running>
+restore_previous() {
   exists "$PREV" || return 0
   owned "$PREV" || { fail "$PREV is not managed by this plugin"; return 0; }
   docker rename "$PREV" "$CTR" >/dev/null 2>&1 || true
   [[ $1 == true ]] && docker start "$CTR" >/dev/null 2>&1 || true
   return 0
 }
-w_run() { # w_run <id> <starting|switching>
+w_run() {
   local id=$1 phase=$2 r was=false prev_active
   guard || oops "another operation is running"
   r=$(resolve "$id") || oops "recipe $id failed validation"
@@ -413,11 +412,19 @@ w_unload() {
   setstate idle
 }
 emit() {
-  local s g served ok=false; s=$(sread)
+  local s g served ok=false; adopt; s=$(sread)
   if [[ $(jq -r '.active.apiReady' <<<"$s") == true ]]; then
     g=$(gpus_json 2>/dev/null || printf '[]'); owned "$CTR" && running "$CTR" && served=$(api models 2 2>/dev/null | jq -r '.data[0].id//empty') && [[ $served == "$(jq -r .active.servedModel <<<"$s")" ]] && ok=true
     $ok && jq -c --argjson g "$g" '.gpus=$g' <<<"$s" || jq -c --argjson g "$g" '.gpus=$g|.state="error"|.error=(if .error=="" then "accepted runtime is unavailable" else .error end)|.active.apiReady=false|.active.toolCallReady=false' <<<"$s"
   else printf '%s\n' "$s"; fi
+}
+adopt() {
+  local s state rid r served ids; s=$(sread); state=$(jq -r .state <<<"$s"); [[ $(jq -r '.active.container' <<<"$s") == "" && $state =~ ^(uninitialized|idle|downloaded|error)$ ]] || return 0
+  owned "$CTR" && running "$CTR" || return 0; rid=$(docker inspect -f "{{index .Config.Labels \"$LABEL.recipe\"}}" "$CTR" 2>/dev/null) || return 0
+  r=$(resolve "$rid" 2>/dev/null) || return 0; served=$(api models 2 2>/dev/null | jq -r '.data[0].id//empty') || return 0; [[ -n $served ]] || return 0
+  ids=$(docker inspect -f '{{json .HostConfig.DeviceRequests}}' "$CTR" 2>/dev/null | jq -c '[.[]?.DeviceIDs[]?|tonumber]' 2>/dev/null || printf '[]'); [[ -n $ids ]] || ids='[]'
+  sw '.active={recipeId:$r.id,modelId:$r.model.id,name:$r.model.name,servedModel:$s,container:$c,endpoint:("http://127.0.0.1:"+($p|tostring)+"/v1"),port:$p,gpuIndices:$ids,apiReady:true,toolCallReady:false,tools:($r.capabilities.tools//false)}|.models|=map(.active=(.recipeId==$r.id))|.state="ready"|.error=""' --argjson r "$r" --arg s "$served" --arg c "$CTR" --argjson p "$PORT" --argjson ids "$ids"
+  wire "$r" "$served" || true
 }
 usage() {
   echo 'Usage: omarchy-local-ai <command>
