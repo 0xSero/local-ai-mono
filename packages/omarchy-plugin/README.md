@@ -1,5 +1,7 @@
 # Omarchy Local AI
 
+This is the preserved plugin from the original `omarchy-local-ai` repository. The alternate integration imported from `local-ai-global` remains under `archive/local-ai-global-omarchy-plugin` for reference instead of mixing two lifecycle implementations in one package.
+
 One small Omarchy plugin for local inference. It reads the normalized
 [`0xSero/local-ai-registry`](https://github.com/0xSero/local-ai-registry) contract at
 `~/omarchy/local-ai/registry`. Its six actions are Scan, Download, Run, Unload,
@@ -10,7 +12,7 @@ compatible 1, 2, 4, or larger GPU recipe in ascending order. It uses no invented
 The toolbar popup is a compact status surface. Open its full native panel for hardware inventory, every compatible recipe, downloads, runtime state, and lifecycle controls.
 ## Install
 ```bash
-omarchy plugin add https://github.com/0xSero/omarchy-local-ai.git --yes
+omarchy plugin add https://github.com/0xSero/local-ai-mono.git --yes
 omarchy plugin enable sero.local-ai
 ```
 ## CLI

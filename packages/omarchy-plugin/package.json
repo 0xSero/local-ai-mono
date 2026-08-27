@@ -1,5 +1,5 @@
 {
   "name": "@local-ai/omarchy-plugin",
   "private": true,
-  "scripts": { "typecheck": "for file in bin/* default/omarchy/*.sh; do bash -n \"$file\"; done" }
+  "scripts": { "typecheck": "for file in bin/* lib/*.sh; do bash -n \"$file\"; done" }
 }
