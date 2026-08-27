@@ -413,7 +413,7 @@ w_unload() {
 }
 emit() {
   local s g served ok=false; adopt; s=$(sread)
-  if [[ $(jq -r '.active.apiReady' <<<"$s") == true ]]; then
+  if jq -e '. as $s|$s.active.apiReady and (["scanning","downloading","starting","switching","unloading"]|index($s.state)|not)' >/dev/null <<<"$s"; then
     g=$(gpus_json 2>/dev/null || printf '[]'); owned "$CTR" && running "$CTR" && served=$(api models 2 2>/dev/null | jq -r '.data[0].id//empty') && [[ $served == "$(jq -r .active.servedModel <<<"$s")" ]] && ok=true
     $ok && jq -c --argjson g "$g" '.gpus=$g' <<<"$s" || jq -c --argjson g "$g" '.gpus=$g|.state="error"|.error=(if .error=="" then "accepted runtime is unavailable" else .error end)|.active.apiReady=false|.active.toolCallReady=false' <<<"$s"
   else printf '%s\n' "$s"; fi
