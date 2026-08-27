@@ -253,7 +253,7 @@ downloads_json() {
     local bytes=0 image_ready=false model_ready=false path="$AI_CACHE/models/$id"
     [[ -d $path ]] && bytes=$(du -sk "$path" | awk '{print $1 * 1024}')
     docker image inspect "$image" >/dev/null 2>&1 && image_ready=true
-    ((expected == 0 || bytes * 100 >= expected * 95)) && model_ready=true
+    ((expected == 0 || bytes * 100 >= expected * 90)) && model_ready=true
     jq -nc --arg id "$id" --arg model "$model" --argjson expected "$expected" --argjson bytes "$bytes" \
       --argjson image "$image_ready" --argjson downloaded "$model_ready" '{id:$id,model:$model,expectedBytes:$expected,localBytes:$bytes,imageDownloaded:$image,modelDownloaded:$downloaded}'
   done | jq -s .
