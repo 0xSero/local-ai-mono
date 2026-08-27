@@ -397,8 +397,8 @@ status_json() {
   [[ $(docker inspect -f '{{.State.Running}}' "$AI_CONTAINER" 2>/dev/null) == true ]] && running=true
   if $running; then served=$(served_model 2>/dev/null || true); [[ -n $served ]] && ready=true; live=$(model_vram_json); fi
   jq -n --arg model "$(jq -r '.model.name // .model.id' <<<"$recipe")" --arg recipe "$(jq -r '.id' <<<"$recipe")" --arg hardware "$(jq -r '.localProduct // .compatibility.hardwareId' <<<"$recipe")" \
-    --arg engine "$(jq -r '.engine.name' <<<"$recipe")" --arg served "$served" --argjson live "$live" --argjson accelerators "$(jq -r '.compatibility.acceleratorCount' <<<"$recipe")" --argjson running "$running" --argjson ready "$ready" --argjson port "$AI_PORT" \
-    '{state:(if $ready then "ready" elif $running then "loading" else "stopped" end),ready:$ready,running:$running,model:$model,servedModel:$served,recipeId:$recipe,engine:$engine,hardware:$hardware,acceleratorCount:$accelerators,port:$port}+$live'
+    --arg engine "$(jq -r '.engine.name' <<<"$recipe")" --arg served "$served" --argjson live "$live" --argjson tools "$(jq -r '.capabilities.tools // false' <<<"$recipe")" --argjson accelerators "$(jq -r '.compatibility.acceleratorCount' <<<"$recipe")" --argjson running "$running" --argjson ready "$ready" --argjson port "$AI_PORT" \
+    '{state:(if $ready then "ready" elif $running then "loading" else "stopped" end),ready:$ready,running:$running,model:$model,servedModel:$served,recipeId:$recipe,engine:$engine,hardware:$hardware,acceleratorCount:$accelerators,tools:$tools,port:$port}+$live'
 }
 
 downloads_json() {

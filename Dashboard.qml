@@ -77,7 +77,7 @@ Item {
           Column {
             width: parent.width - headerActions.implicitWidth
             Text { text: "Local AI"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.iconLarge; font.weight: Font.Medium }
-            Meta { text: root.errorText || root.busy || root.notice || (root.status.ready ? root.status.model + " · " + root.status.acceleratorCount + " × " + root.status.hardware + " · " + root.vram() + " · API ready" : root.status.running ? "Model loading" : "Nothing running") }
+            Meta { text: root.errorText || root.busy || root.notice || (root.status.ready ? root.status.model + " · " + root.status.acceleratorCount + " × " + root.status.hardware + " · " + root.vram() + " · API + " + (root.status.tools ? "tools ready" : "chat only") : root.status.running ? "Model loading" : "Nothing running") }
           }
           Row {
             id: headerActions; spacing: Style.space(16)

@@ -75,7 +75,7 @@ Panel {
         Column {
           width: parent.width; spacing: Style.space(3)
           Text { text: root.status.model || "Local AI"; color: root.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.heading; font.weight: Font.Medium }
-          Meta { text: root.errorText || root.busy || (root.status.ready ? "API ready · " + root.vram() : root.status.running ? "loading" : "nothing running") }
+          Meta { text: root.errorText || root.busy || (root.status.ready ? "API + " + (root.status.tools ? "tools ready · " : "chat only · ") + root.vram() : root.status.running ? "loading" : "nothing running") }
         }
         Column {
           width: parent.width; spacing: Style.space(3)
