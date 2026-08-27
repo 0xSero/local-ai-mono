@@ -111,8 +111,10 @@ Item {
               model: root.groups
               Column {
                 required property var modelData; width: parent.width; spacing: Style.space(2)
-                Text { width: parent.width; text: modelData.count + " × " + (modelData.registryName || modelData.product); color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; wrapMode: Text.WordWrap }
-                Meta { text: Math.round(modelData.memoryBytesEach / 1073741824) + " GB each · " + modelData.backend + (root.activeHardware(modelData) ? " · " + root.vram() + " · running " + root.status.model : "") }
+                Text { width: parent.width; text: modelData.count + " × " + (modelData.registryName || modelData.product); color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight }
+                Meta { width: parent.width; text: Math.round(modelData.memoryBytesEach / 1073741824) + " GB each · " + modelData.backend; elide: Text.ElideRight }
+                Meta { visible: root.activeHardware(modelData); width: parent.width; text: root.vram(); elide: Text.ElideRight }
+                Meta { visible: root.activeHardware(modelData); width: parent.width; text: "running " + root.status.model; elide: Text.ElideRight }
               }
             }
             Label { text: "REGISTRY"; topPadding: Style.space(8) }
