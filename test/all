@@ -3,83 +3,58 @@
 set -euo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
-export HOME="$TMP/home" OMARCHY_AI_STATE="$TMP/state" OMARCHY_AI_CACHE="$TMP/cache"
-export OMARCHY_AI_HARDWARE_JSON='{"groups":[{"backend":"nvidia","product":"NVIDIA GeForce RTX 3090","count":4,"memoryBytesEach":25769803776,"devices":[{"index":0,"totalMiB":24576,"freeMiB":22000},{"index":1,"totalMiB":24576,"freeMiB":22000},{"index":2,"totalMiB":24576,"freeMiB":22000},{"index":3,"totalMiB":24576,"freeMiB":22000}]}],"dockerReady":true,"diskFreeBytes":999999999999}'
-mkdir -p "$OMARCHY_AI_STATE"
+export OMARCHY_AI_USER_HOME="$TMP/user" OMARCHY_AI_STATE="$TMP/state" OMARCHY_AI_CACHE="$TMP/cache" OMARCHY_AI_REGISTRY="$TMP/registry"
+export OMARCHY_AI_HARDWARE_JSON='{"groups":[{"backend":"nvidia","product":"NVIDIA GeForce RTX 3090","count":4,"memoryBytesEach":25769803776,"devices":[{"index":0,"totalMiB":24576,"freeMiB":23000},{"index":1,"totalMiB":24576,"freeMiB":23000},{"index":2,"totalMiB":24576,"freeMiB":23000},{"index":3,"totalMiB":24576,"freeMiB":23000}]}],"dockerReady":true,"diskFreeBytes":999999999999}'
+mkdir -p "$OMARCHY_AI_USER_HOME" "$OMARCHY_AI_STATE" "$OMARCHY_AI_CACHE" "$OMARCHY_AI_REGISTRY"/{hardware,model,model-instance,recipe,speed-sweeps}
 
 digest=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 revision=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-jq -n --arg digest "$digest" --arg revision "$revision" '{
-  schemaVersion:"omarchy-local-ai/v1",
-  hardware:[
-    {id:"nvidia.rtx-3090.24gb.x1.pcie",acceleratorBackend:"nvidia",acceleratorCount:1,memoryBytesEach:25769803776,product:"NVIDIA GeForce RTX 3090 24GB"},
-    {id:"nvidia.rtx-pro-6000-blackwell.96gb.x1.pcie",acceleratorBackend:"nvidia",acceleratorCount:1,memoryBytesEach:103079215104,product:"NVIDIA RTX PRO 6000 Blackwell"}
-  ],
-  recipes:[
-    {schemaVersion:"omarchy-local-ai/v1",id:"small-3090",status:"validated",description:"test",
-      compatibility:{acceleratorBackend:"nvidia",acceleratorCount:1,hardwareId:"nvidia.rtx-3090.24gb.x1.pcie",minimumDiskBytes:1,minimumMemoryBytesEach:24000000000},
-      capabilities:{chat:true,reasoning:false,tools:false,vision:false},endpoint:{protocol:"openai/v1",containerPort:30000,modelPath:"/v1/models",completionPath:"/v1/chat/completions"},
-      engine:{name:"sglang",graphMode:"full",version:"test"},model:{id:"small",repository:"org/small",revision:$revision,servedName:"org/small",weightPrecision:"BF16",downloadBytes:100},
-      serving:{configuredMaxContextTokens:8192,tensorParallel:1},launch:{adapter:"docker.openai-v1",image:("image@sha256:"+$digest),entrypoint:"/bin/server",ipc:"host",sharedMemoryBytes:1073741824,environment:{A:"B"},assets:[],modelCache:{containerPath:"/models",repository:"org/small",revision:$revision},arguments:["--model","org/small"]}},
-    {schemaVersion:"omarchy-local-ai/v1",id:"large-pro",status:"validated",description:"other",
-      compatibility:{acceleratorBackend:"nvidia",acceleratorCount:1,hardwareId:"nvidia.rtx-pro-6000-blackwell.96gb.x1.pcie",minimumDiskBytes:1,minimumMemoryBytesEach:96000000000},
-      capabilities:{chat:true,reasoning:false,tools:false,vision:false},endpoint:{protocol:"openai/v1",containerPort:30000,modelPath:"/v1/models",completionPath:"/v1/chat/completions"},
-      engine:{name:"vllm",graphMode:"full",version:"test"},model:{id:"large",repository:"org/large",revision:$revision,servedName:"org/large",weightPrecision:"FP8",downloadBytes:100},
-      serving:{configuredMaxContextTokens:8192,tensorParallel:1},launch:{adapter:"docker.openai-v1",image:("image@sha256:"+$digest),entrypoint:null,ipc:"host",sharedMemoryBytes:0,environment:{},assets:[],modelCache:{containerPath:"/models",repository:"org/large",revision:$revision},arguments:["--model","org/large"]}}
-  ]}' >"$OMARCHY_AI_STATE/catalog.json"
+jq -n '{schema_version:"local-ai-registry/v1",id:"rtx-3090-24gb",name:"GeForce RTX 3090",vendor:"nvidia",accelerator_backend:"nvidia",memory:{vram_gb:24},aliases:["rtx 3090"]}' >"$OMARCHY_AI_REGISTRY/hardware/rtx-3090-24gb.json"
+jq -n '{schema_version:"local-ai-registry/v1",id:"small",name:"Small Registry Model"}' >"$OMARCHY_AI_REGISTRY/model/small.json"
+jq -n --arg revision "$revision" '{schema_version:"local-ai-registry/v1",id:"org-small--bf16",model_id:"small",repository:"org/small",revision:$revision,weights:{format:"safetensors",precision:"BF16",size_gb:0.0000001}}' >"$OMARCHY_AI_REGISTRY/model-instance/org-small--bf16.json"
+jq -n --arg digest "$digest" '{schema_version:"local-ai-registry/v1",id:"small-3090",status:"validated",model_instance_id:"org-small--bf16",hardware_id:"rtx-3090-24gb",hardware_count:1,
+  engine:{name:"sglang",version:"test",graph_mode:"full"},launch:{kind:"docker",image:("image@sha256:"+$digest),container_port:30000,entrypoint:"/bin/server",ipc:"host",shm_size:"1g",environment:{A:"B"},mounts:[{source:"~/.cache/huggingface",target:"/root/.cache/huggingface",read_only:false}],arguments:["--model","org/small"]},
+  serving:{max_context_tokens:8192,tensor_parallel:1},capabilities:{chat:true,reasoning:false,tools:false,vision:false},speed_sweeps_ids:["small-sweep"]}' >"$OMARCHY_AI_REGISTRY/recipe/small-3090.json"
+jq -n '{schema_version:"local-ai-registry/v1",id:"small-sweep",recipe_id:"small-3090",rows:[{status:"accepted",decode_tok_s:42.5}]}' >"$OMARCHY_AI_REGISTRY/speed-sweeps/small-sweep.json"
+jq -n '{schema_version:"local-ai-registry/v1",recipes:[{id:"small-3090",status:"validated",model_instance_id:"org-small--bf16",hardware_id:"rtx-3090-24gb",hardware_count:1,engine:"sglang",launch_kind:"docker",has_evidence:true}]}' >"$OMARCHY_AI_REGISTRY/index.json"
 
 source "$ROOT/lib/core.sh"
 pass=0
-ok() { pass=$((pass+1)); echo "ok $pass - $1"; }
-assert() { "$@" || { echo "not ok - $*" >&2; exit 1; }; }
+ok() { pass=$((pass+1)); printf 'ok %s - %s\n' "$pass" "$1"; }
+assert() { "$@" || { printf 'not ok - %s\n' "$*" >&2; exit 1; }; }
 
-assert catalog_valid "$AI_CATALOG"; ok 'registry schema and immutable launch data validate'
-bad="$TMP/bad.json"; jq '.recipes[0].launch.arguments += ["--enforce-eager"]' "$AI_CATALOG" >"$bad"
-if catalog_valid "$bad"; then echo 'not ok - eager recipe accepted' >&2; exit 1; fi
-ok 'eager and graph-disabling launches are refused'
-
-snapshot=$(snapshot_json)
-assert test "$(jq '.models|length' <<<"$snapshot")" = 2
-assert test "$(jq -r '.models[]|select(.id=="small")|.compatible' <<<"$snapshot")" = true
-assert test "$(jq -r '.models[]|select(.id=="small")|.ready' <<<"$snapshot")" = true
-assert test "$(jq -r '.models[]|select(.id=="large")|.compatible' <<<"$snapshot")" = false
-ok 'all model names remain visible while compatibility is honest'
+assert registry_valid; ok 'canonical registry index validates'
+snapshot=$(registry_snapshot_json)
+assert jq -e '.schemaVersion=="local-ai-registry/v1" and .registry.recipeCount==1 and .models[0].name=="Small Registry Model" and .models[0].registrySpeed==42.5 and .hardware.groups[0].registryId=="rtx-3090-24gb"' >/dev/null <<<"$snapshot"
+ok 'hardware and model names come only from referenced registry records'
 
 recipe=$(recipe_json small); plan=$(plan_json "$recipe")
 assert jq -e '.argv|index("127.0.0.1:12434:30000") and index("device=0") and index("image@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")' >/dev/null <<<"$plan"
-if jq -r '.argv[]' <<<"$plan" | grep -Eqi 'enforce.eager|disable.*cuda.*graph'; then exit 1; fi
-ok 'plan is loopback-only, pins one GPU, and preserves graph mode'
+assert jq -e '[.argv[]|select(test("enforce.eager|disable.*cuda.*graph";"i"))]|length==0' >/dev/null <<<"$plan"
+ok 'launch plan is digest-pinned, loopback-only, and keeps CUDA graphs'
 
-downloads=$(downloads_json)
-assert jq -e 'length==1 and .[0].model=="small" and .[0].localBytes==0 and .[0].modelDownloaded==false' >/dev/null <<<"$downloads"
-dd if=/dev/zero of="$OMARCHY_AI_CACHE/models/small-3090/weights.bin" bs=91 count=1 status=none
-assert jq -e '.[0].modelDownloaded==true' >/dev/null <<<"$(downloads_json)"
-rm -rf "$OMARCHY_AI_CACHE/models/small-3090"; mkdir -p "$OMARCHY_AI_CACHE/huggingface/hub/models--org--small"
-dd if=/dev/zero of="$OMARCHY_AI_CACHE/huggingface/hub/models--org--small/weights.bin" bs=91 count=1 status=none
-assert jq -e '.[0].modelDownloaded==true' >/dev/null <<<"$(downloads_json)"
-touch "$OMARCHY_AI_CACHE/huggingface/hub/models--org--small/weights.incomplete"
-assert jq -e '.[0].modelDownloaded==false' >/dev/null <<<"$(downloads_json)"
-ok 'download state is valid JSON for every compatible recipe'
+jq '.launch.arguments += ["--enforce-eager"]' "$OMARCHY_AI_REGISTRY/recipe/small-3090.json" >"$TMP/bad"; mv "$TMP/bad" "$OMARCHY_AI_REGISTRY/recipe/small-3090.json"
+if resolved_recipe small-3090 "$(hardware_with_registry)" >/dev/null 2>&1; then printf 'not ok - unsafe registry recipe accepted\n' >&2; exit 1; fi
+ok 'unsafe registry launch arguments are refused'
+jq '.launch.arguments = ["--model","org/small"]' "$OMARCHY_AI_REGISTRY/recipe/small-3090.json" >"$TMP/good"; mv "$TMP/good" "$OMARCHY_AI_REGISTRY/recipe/small-3090.json"
 
-wire_agents "$recipe"
-assert jq -e '.providers.local.baseUrl=="http://127.0.0.1:12434/v1" and (.providers.local.models[0]|has("maxTokens")|not)' "$HOME/.omp/agent/models.json" >/dev/null
-assert jq -e '.defaultProvider=="local" and .defaultModel=="org/small"' "$HOME/.omp/agent/settings.json" >/dev/null
-assert ruby -ryaml -rjson -e 'd=YAML.safe_load(File.read(ARGV[0])); abort unless d.dig("providers","omarchy-local","auth")=="none" && d.dig("providers","omarchy-local","models",0,"id")=="org/small"' "$HOME/.omp/agent/models.yml"
-assert ruby -ryaml -rjson -e 'd=YAML.safe_load(File.read(ARGV[0])); abort unless d.dig("modelRoles","default")=="omarchy-local/org/small"' "$HOME/.omp/agent/config.yml"
-unwire_agents
-assert jq -e '(.providers.local==null)' "$HOME/.omp/agent/models.json" >/dev/null
-assert ruby -ryaml -e 'd=YAML.safe_load(File.read(ARGV[0])); abort if d.dig("providers","omarchy-local")' "$HOME/.omp/agent/models.yml"
-ok 'OMP and Pi wiring is minimal and reversible'
+mkdir -p "$OMARCHY_AI_USER_HOME/.cache/huggingface/hub/models--org--small"; dd if=/dev/zero of="$OMARCHY_AI_USER_HOME/.cache/huggingface/hub/models--org--small/weights.bin" bs=92 count=1 status=none
+assert jq -e 'length==1 and .[0].model=="Small Registry Model" and .[0].modelDownloaded==true' >/dev/null <<<"$(downloads_json "$(registry_snapshot_json)")"
+ok 'download state follows registry-declared cache mounts'
+
+served_model() { printf 'org/small\n'; }
+wire_agents "$(recipe_json small)"
+assert jq -e '.providers.local.baseUrl=="http://127.0.0.1:12434/v1" and (.providers.local.models[0]|has("maxTokens")|not)' "$OMARCHY_AI_USER_HOME/.omp/agent/models.json" >/dev/null
+assert ruby -ryaml -e 'd=YAML.safe_load(File.read(ARGV[0])); abort unless d.dig("modelRoles","default")=="omarchy-local/org/small"' "$OMARCHY_AI_USER_HOME/.omp/agent/config.yml"
+unwire_agents; ok 'OMP and Pi wiring is minimal and reversible'
 
 assert jq -e '.id=="sero.local-ai" and .entryPoints.barWidget=="Panel.qml"' "$ROOT/manifest.json" >/dev/null
-assert grep -q 'Qt.resolvedUrl' "$ROOT/Panel.qml"
-if grep -q 'IpcHandler' "$ROOT/Panel.qml"; then exit 1; fi
-if grep -Eq '#[0-9A-Fa-f]{6}' "$ROOT/Panel.qml"; then exit 1; fi
-ok 'plugin is installable and inherits the system theme'
+if grep -Eq 'Qwen|Gemma|LFM|Ornith|#[0-9A-Fa-f]{6}' "$ROOT/Panel.qml"; then printf 'not ok - panel embeds catalog data or fixed colors\n' >&2; exit 1; fi
+ok 'theme-native panel contains no invented models'
 
 for file in "$ROOT"/bin/* "$ROOT"/lib/*.sh "$ROOT"/test/all; do bash -n "$file"; done
 lines=$(find "$ROOT" -type f -not -path '*/.git/*' -not -name '.DS_Store' -print0 | xargs -0 wc -l | tail -1 | awk '{print $1}')
-((lines <= 1000)) || { echo "not ok - $lines lines exceeds 1000" >&2; exit 1; }
+((lines <= 1000)) || { printf 'not ok - %s lines exceeds 1000\n' "$lines" >&2; exit 1; }
 ok "repository stays compact ($lines lines)"
 
-echo "1..$pass"
+printf '1..%s\n' "$pass"

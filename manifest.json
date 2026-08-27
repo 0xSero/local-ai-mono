@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "sero.local-ai",
   "name": "Local AI",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "0xSero",
   "license": "MIT",
   "description": "Detect hardware, consume the Omarchy model registry, and run one validated local model.",

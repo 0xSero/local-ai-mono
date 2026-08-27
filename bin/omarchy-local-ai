@@ -10,7 +10,7 @@ source "$AI_ROOT/lib/core.sh"
 usage() {
   echo 'Usage: omarchy-local-ai <command>
 
-  sync                  refresh the validated registry cache
+  sync                  clone or fast-forward ~/omarchy/local-ai
   hardware [--json]     show detected accelerators
   models [--json]       list every registry model and compatibility
   run [model|recipe]    choose and serve one compatible model
@@ -24,22 +24,20 @@ usage() {
 
 command=${1:-help}; shift || true
 case "$command" in
-  sync) sync_catalog ;;
+  sync) sync_registry ;;
   hardware)
     data=$(hardware_json)
     if [[ ${1:-} == --json ]]; then jq . <<<"$data"; else jq -r '.groups[]|"\(.count)× \(.product) · \(.memoryBytesEach/1073741824|floor) GB each"' <<<"$data"; fi
     ;;
   models)
-    data=$(snapshot_json)
+    data=$(registry_snapshot_json)
     if [[ ${1:-} == --json ]]; then jq '.models' <<<"$data"; else jq -r '.models[]|(.id + " · " + (if .ready then "ready" elif .compatible then "busy" else "other hardware" end) + " · " + .precision + " · " + .engine)' <<<"$data"; fi
     ;;
-  snapshot)
-    jq --argjson status "$(status_json)" '. + {status:$status}' <<<"$(snapshot_json)"
-    ;;
+  snapshot) snapshot_json ;;
   run)
     wanted=${1:-}
     if [[ -z $wanted ]]; then
-      wanted=$(snapshot_json | jq -r '.models[]|select(.compatible)|[.id,(if .ready then "ready" else "busy" end),.precision,.engine]|@tsv' \
+      wanted=$(registry_snapshot_json | jq -r '.models[]|select(.compatible)|[.id,(if .ready then "ready" else "busy" end),.precision,.engine]|@tsv' \
         | gum choose --header 'Local AI · choose a model' | cut -f1)
     fi
     [[ -n $wanted ]] && run_recipe "$wanted"
