@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home" OMARCHY_AI_STATE="$TMP/state" OMARCHY_AI_CACHE="$TMP/cache"
-export OMARCHY_AI_HARDWARE_JSON='{"groups":[{"backend":"nvidia","product":"NVIDIA GeForce RTX 3090","count":4,"memoryBytesEach":25769803776,"devices":[{"index":0,"totalMiB":24576,"freeMiB":24576},{"index":1,"totalMiB":24576,"freeMiB":24576},{"index":2,"totalMiB":24576,"freeMiB":24576},{"index":3,"totalMiB":24576,"freeMiB":24576}]}],"dockerReady":true,"diskFreeBytes":999999999999}'
+export OMARCHY_AI_HARDWARE_JSON='{"groups":[{"backend":"nvidia","product":"NVIDIA GeForce RTX 3090","count":4,"memoryBytesEach":25769803776,"devices":[{"index":0,"totalMiB":24576,"freeMiB":22000},{"index":1,"totalMiB":24576,"freeMiB":22000},{"index":2,"totalMiB":24576,"freeMiB":22000},{"index":3,"totalMiB":24576,"freeMiB":22000}]}],"dockerReady":true,"diskFreeBytes":999999999999}'
 mkdir -p "$OMARCHY_AI_STATE"
 
 digest=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -41,6 +41,7 @@ ok 'eager and graph-disabling launches are refused'
 snapshot=$(snapshot_json)
 assert test "$(jq '.models|length' <<<"$snapshot")" = 2
 assert test "$(jq -r '.models[]|select(.id=="small")|.compatible' <<<"$snapshot")" = true
+assert test "$(jq -r '.models[]|select(.id=="small")|.ready' <<<"$snapshot")" = true
 assert test "$(jq -r '.models[]|select(.id=="large")|.compatible' <<<"$snapshot")" = false
 ok 'all model names remain visible while compatibility is honest'
 

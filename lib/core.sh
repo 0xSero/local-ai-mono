@@ -93,9 +93,9 @@ snapshot_json() {
     | [.recipes[] | . as $r | ($known[] | select(.id == $r.compatibility.hardwareId)) as $h
       | ([ $local.groups[] | select(.backend == $h.acceleratorBackend)
           | select((.product|norm) == ($h.product|norm))
-          | select(.count >= $h.acceleratorCount and .memoryBytesEach >= $r.compatibility.minimumMemoryBytesEach) ]) as $match
+      | select(.count >= $h.acceleratorCount and .memoryBytesEach >= $r.compatibility.minimumMemoryBytesEach) ]) as $match
       | . + {compatible:($match|length > 0), ready:([$match[].devices[]?
-          | select((.freeMiB * 1048576) >= $r.compatibility.minimumMemoryBytesEach)] | length >= $h.acceleratorCount),
+          | select((.freeMiB * 1048576) >= ($r.compatibility.minimumMemoryBytesEach * 0.9))] | length >= $h.acceleratorCount),
           localProduct:($match[0].product // ""), localCount:($match[0].count // 0)}] as $recipes
     | {schemaVersion, hardware:$local, active:$active, recipes:$recipes,
        models:[$recipes | group_by(.model.id)[] | {id:.[0].model.id,
@@ -135,7 +135,7 @@ plan_json() {
   if [[ $backend == "nvidia" ]]; then
     ids=$(hardware_json | jq -r --arg product "$(jq -r '.localProduct' <<<"$recipe")" --argjson need "$count" \
       --argjson minimum "$(jq -r '.compatibility.minimumMemoryBytesEach' <<<"$recipe")" '
-      [.groups[]|select(.product==$product).devices[]|select((.freeMiB*1048576)>=$minimum)]|sort_by(-.freeMiB)|.[:$need]|map(.index)|join(",")')
+      [.groups[]|select(.product==$product).devices[]|select((.freeMiB*1048576)>=($minimum*0.9))]|sort_by(-.freeMiB)|.[:$need]|map(.index)|join(",")')
     [[ -n $ids ]] || fail "compatible NVIDIA GPUs are busy"
     argv+=(--gpus "device=$ids")
   else
