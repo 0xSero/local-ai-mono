@@ -20,7 +20,7 @@ curl 'https://local-ai-registry.vercel.app/api/v1/recipes?hardware_id=rtx-pro-60
 
 ## What it does
 
-The API exposes the immutable registry graph as JSON. Clients can list and filter hardware, models, model instances, recipes, prices, and speed sweeps, or retrieve one record by its stable ID.
+The API exposes the immutable registry graph as JSON. Clients can list and filter hardware, models, model instances, recipes, prices, speed sweeps, benchmark definitions, and benchmark scores, or retrieve one record by its stable ID.
 
 The API is read-only. It does not accept submissions, download weights, start inference engines, or modify the registry.
 
@@ -38,6 +38,8 @@ The API is read-only. It does not accept submissions, download weights, start in
 | `GET /api/v1/compatibility` | Alias for the recipe compatibility query |
 | `GET /api/v1/prices` | Regional market-price records |
 | `GET /api/v1/speed-sweeps` | Measured inference results |
+| `GET /api/v1/benchmarks` | Evaluation definitions, runner contracts, and score coverage |
+| `GET /api/v1/benchmark-runs` | Direct and inherited model-instance scores with provenance |
 | `GET /api/v1/:collection/:id` | One fully resolved record |
 
 ## Lists and filters
@@ -47,6 +49,8 @@ List routes accept collection fields as query parameters. Filters are combined, 
 ```bash
 curl 'https://local-ai-registry.vercel.app/api/v1/hardware?vendor=nvidia&limit=25'
 curl 'https://local-ai-registry.vercel.app/api/v1/models?family=qwen'
+curl 'https://local-ai-registry.vercel.app/api/v1/benchmarks?runner_status=available&min_model_count=10'
+curl 'https://local-ai-registry.vercel.app/api/v1/benchmark-runs?benchmark_id=mmlu-pro&score_origin=direct'
 curl 'https://local-ai-registry.vercel.app/api/v1/prices?region=US'
 curl 'https://local-ai-registry.vercel.app/api/v1/recipes?hardware_id=rtx-pro-6000-blackwell-96gb&status=validated'
 ```

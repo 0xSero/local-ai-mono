@@ -55,12 +55,21 @@ Supported collections are:
 
 ```ts
 type RegistryCollection =
+  | "benchmark-runs"
+  | "benchmarks"
   | "hardware"
   | "model-instances"
   | "models"
   | "prices"
   | "recipes"
   | "speed-sweeps"
+```
+
+Benchmark definitions and score records use the same generic client:
+
+```ts
+const benchmarks = await client.list("benchmarks", { runner_status: "available", min_model_count: 10 })
+const directScores = await client.list("benchmark-runs", { benchmark_id: "mmlu-pro", score_origin: "direct" })
 ```
 
 Filter values may be strings, numbers, or booleans. The SDK serializes them as URL query parameters and returns the API's paginated list envelope.

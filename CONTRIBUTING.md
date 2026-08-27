@@ -7,12 +7,14 @@ The registry accepts evidence, not recommendations. A contribution must identify
 Submit normalized records directly to the source-of-truth tree:
 
 ```text
-packages/registry/
+packages/local-ai-registry/registry/
   hardware/<hardware-id>.json
   model/<model-id>.json
   model-instance/<model-instance-id>.json
   recipe/<recipe-id>.json
   speed-sweeps/<sweep-id>.json
+  benchmark/<benchmark-id>.json
+  benchmark-run/<model-instance-id>--<benchmark-id>.json
   price/<product-id>/<region>.json
 ```
 
@@ -29,9 +31,11 @@ Choose the smallest complete change:
 | `model-instance` | The exact downloadable artifact, quantization, or fine-tune does not exist | Parent model ID, repository, immutable revision or explicit unknown, served name, weight format, precision, size, Hugging Face identity, provenance |
 | `recipe` | The artifact has evidence on a hardware and engine combination | Model-instance ID, hardware ID and count, engine and version, launch contract, serving limits, capabilities, evidence references, provenance |
 | `speed-sweeps` | A real run produced measurements | Recipe ID, measurement time, source, concurrency, context and output tokens, prefill, decode, TTFT, peak memory, sample count, status |
+| `benchmark` | An evaluation definition is missing | Name, primary link, wrapper command, runner status, metric semantics, coverage, provenance |
+| `benchmark-run` | A source reports a score for a registered model | Benchmark, model, model instance, score, protocol, direct or inherited origin, source URL, provenance |
 | `price` | A regional market observation is available | Product, region, currency, amount, condition, seller, source URL, observation time |
 
-The JSON Schemas in [`packages/registry/schema`](packages/registry/schema) are authoritative. Use an existing record of the same type as the starting point; do not invent a second submission shape.
+The JSON Schemas in [`packages/local-ai-registry/registry/schema`](packages/local-ai-registry/registry/schema) are authoritative. Use an existing record of the same type as the starting point; do not invent a second submission shape.
 
 ## Candidate versus validated
 
@@ -100,9 +104,9 @@ The supported bulk input is a read-only publication directory containing:
 Import it with:
 
 ```bash
-python3 packages/submission-harness/scripts/import_postgres_publication.py <snapshot> --root packages/registry
-python3 packages/submission-harness/scripts/enrich_registry.py packages/registry
-python3 packages/submission-harness/scripts/curate_registry.py packages/registry --index-only
+python3 packages/submission-harness/scripts/import_postgres_publication.py <snapshot> --root packages/local-ai-registry/registry
+python3 packages/submission-harness/scripts/enrich_registry.py packages/local-ai-registry/registry
+python3 packages/submission-harness/scripts/curate_registry.py packages/local-ai-registry/registry --index-only
 ```
 
 The importer deliberately creates `candidate` recipes with reference launches. It preserves measured compatibility without promoting incomplete launch text to one-click Docker.
@@ -123,14 +127,14 @@ See [`docs/guides/local-ai-source.md`](docs/guides/local-ai-source.md) for the b
 
 Useful examples:
 
-- Candidate recipe: [`packages/registry/recipe/pg-internscience-agents-a1-q4-k-m-gguf-agents-a1-q4-k-m-gguf-q4km-apple-m5-pro-64gb-llama-cpp-7dc1c7154e.json`](packages/registry/recipe/pg-internscience-agents-a1-q4-k-m-gguf-agents-a1-q4-k-m-gguf-q4km-apple-m5-pro-64gb-llama-cpp-7dc1c7154e.json)
-- Validated Docker recipe: [`packages/registry/recipe/qwen38-27b-nvfp4-rtxpro6000-sglang-tp1.json`](packages/registry/recipe/qwen38-27b-nvfp4-rtxpro6000-sglang-tp1.json)
-- Exact artifact: [`packages/registry/model-instance/internscience-agents-a1-q4-k-m-gguf-agents-a1-q4-k-m-gguf--q4km.json`](packages/registry/model-instance/internscience-agents-a1-q4-k-m-gguf-agents-a1-q4-k-m-gguf--q4km.json)
+- Candidate recipe: [`packages/local-ai-registry/registry/recipe/pg-internscience-agents-a1-q4-k-m-gguf-agents-a1-q4-k-m-gguf-q4km-apple-m5-pro-64gb-llama-cpp-7dc1c7154e.json`](packages/local-ai-registry/registry/recipe/pg-internscience-agents-a1-q4-k-m-gguf-agents-a1-q4-k-m-gguf-q4km-apple-m5-pro-64gb-llama-cpp-7dc1c7154e.json)
+- Validated Docker recipe: [`packages/local-ai-registry/registry/recipe/qwen38-27b-nvfp4-rtxpro6000-sglang-tp1.json`](packages/local-ai-registry/registry/recipe/qwen38-27b-nvfp4-rtxpro6000-sglang-tp1.json)
+- Exact artifact: [`packages/local-ai-registry/registry/model-instance/internscience-agents-a1-q4-k-m-gguf-agents-a1-q4-k-m-gguf--q4km.json`](packages/local-ai-registry/registry/model-instance/internscience-agents-a1-q4-k-m-gguf-agents-a1-q4-k-m-gguf--q4km.json)
 
 ## Validate the contribution
 
 ```bash
-python3 packages/submission-harness/scripts/curate_registry.py packages/registry --index-only
+python3 packages/submission-harness/scripts/curate_registry.py packages/local-ai-registry/registry --index-only
 pnpm validate
 pnpm test
 pnpm typecheck
@@ -140,11 +144,11 @@ Review the diff before committing:
 
 ```bash
 git diff --stat
-git diff -- packages/registry/index.json
-git diff -- packages/registry/recipe packages/registry/model-instance packages/registry/speed-sweeps
+git -C packages/local-ai-registry diff -- registry/index.json
+git -C packages/local-ai-registry diff -- registry/recipe registry/model-instance registry/speed-sweeps registry/benchmark registry/benchmark-run
 ```
 
-The index must be generated from the record files. Do not hand-edit counts or compact recipe rows.
+The index must be generated from the record files. Do not hand-edit counts or compact recipe rows. Open the data pull request in `0xSero/local-ai-registry`; after it merges, update this monorepo's `packages/local-ai-registry` pointer in a separate commit.
 
 ## Never submit
 

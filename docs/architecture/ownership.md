@@ -2,11 +2,12 @@
 
 ## Rule
 
-`packages/registry` is the only package that owns normalized Local AI data. Every other package reads that contract or proposes changes through the submission harness.
+`0xSero/local-ai-registry`, pinned at `packages/local-ai-registry`, is the only project that owns normalized Local AI data. Every monorepo package reads that contract or proposes changes through the submission harness.
 
 | Package | Owns | Must not own |
 |---|---|---|
-| `registry` | JSON records, schemas, types, deterministic queries | User state, credentials, running services |
+| `local-ai-registry` submodule | JSON records, schemas, types, immutable evidence | User state, credentials, running services |
+| `registry` | Deterministic local queries over the submodule | Copied registry records, mutation paths |
 | `api` | HTTP representation, pagination, filters, cache headers | Registry copies, mutation routes |
 | `sdk` | Typed client, provider adapters | Global credentials, hidden persistence |
 | `cli` | Hardware detection, TUI, local cache and runtime actions | Curated registry records |

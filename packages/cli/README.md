@@ -23,7 +23,7 @@ The CLI requires Bash 5 and `jq`. `search` also requires `rg`. `choose` uses `gu
 detect hardware -> list compatible recipes -> choose a recipe -> resolve its registry graph
 ```
 
-The CLI reads `packages/registry` directly. It does not call the hosted API, download model weights, build containers, or launch an inference server yet.
+The CLI reads the pinned `packages/local-ai-registry/registry` tree directly. It does not call the hosted API, download model weights, build containers, or launch an inference server yet.
 
 ## Commands
 
@@ -94,7 +94,7 @@ local-ai get model-instance qwen-qwen3-8-27b--nvfp4
 local-ai get recipe deepseek-fp8-rtx-pro-6000-blackwell-96gb-vllm-tp1
 ```
 
-The collection name maps directly to a directory under `packages/registry`.
+The collection name maps directly to a directory under `packages/local-ai-registry/registry`.
 
 ### Search the registry
 
@@ -105,13 +105,26 @@ local-ai search blackwell
 
 Searches hardware, models, model instances, and recipes. Results are printed as tab-separated collection and ID pairs.
 
+### Inspect and run benchmarks
+
+```bash
+local-ai benchmark list
+local-ai benchmark show mmlu-pro
+local-ai benchmark runs mmlu-pro
+local-ai benchmark command mmlu-pro <model-instance-id>
+local-ai benchmark run mmlu-pro <model-instance-id>
+```
+
+Definitions are ordered by coverage of registered models. `command` resolves the reviewed evaluator template without executing it. `run` requires `lm-eval` and refuses benchmark definitions whose runner remains manual. Score records always expose whether the source is direct evidence for the exact artifact or inherited from its canonical model.
+
 ## Configuration
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `LOCAL_AI_REGISTRY_DIR` | Workspace `packages/registry` | Read a different registry checkout |
+| `LOCAL_AI_REGISTRY_DIR` | Workspace `packages/local-ai-registry/registry` | Read a different registry checkout |
 | `LOCAL_AI_HARDWARE` | Automatically detected | Force a specific hardware ID |
 | `LOCAL_AI_HARDWARE_COUNT` | Detected identical GPU count or `1` | Override the number of available accelerators |
+| `LOCAL_AI_BASE_URL` | `http://127.0.0.1:8000/v1/chat/completions` | OpenAI-compatible endpoint used by benchmark runners |
 
 The hardware overrides must still refer to valid registry data:
 
