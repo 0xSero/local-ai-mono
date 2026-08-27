@@ -209,7 +209,7 @@ Panel {
               width: content.width; text: modelData.count + " × " + (modelData.registryName || modelData.product); elide: Text.ElideRight
             }
           }
-          MetaText { text: root.recipeCount + " compatible recipes · " + root.gpuOptions + " GPU options" }
+          MetaText { text: root.recipeCount + " recipes · " + root.gpuOptions + " GPUs" }
         }
 
         Column {
