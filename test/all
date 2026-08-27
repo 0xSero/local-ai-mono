@@ -58,8 +58,11 @@ ok 'download state is valid JSON for every compatible recipe'
 wire_agents "$recipe"
 assert jq -e '.providers.local.baseUrl=="http://127.0.0.1:12434/v1" and (.providers.local.models[0]|has("maxTokens")|not)' "$HOME/.omp/agent/models.json" >/dev/null
 assert jq -e '.defaultProvider=="local" and .defaultModel=="org/small"' "$HOME/.omp/agent/settings.json" >/dev/null
+assert ruby -ryaml -rjson -e 'd=YAML.safe_load(File.read(ARGV[0])); abort unless d.dig("providers","omarchy-local","auth")=="none" && d.dig("providers","omarchy-local","models",0,"id")=="org/small"' "$HOME/.omp/agent/models.yml"
+assert ruby -ryaml -rjson -e 'd=YAML.safe_load(File.read(ARGV[0])); abort unless d.dig("modelRoles","default")=="omarchy-local/org/small"' "$HOME/.omp/agent/config.yml"
 unwire_agents
 assert jq -e '(.providers.local==null)' "$HOME/.omp/agent/models.json" >/dev/null
+assert ruby -ryaml -e 'd=YAML.safe_load(File.read(ARGV[0])); abort if d.dig("providers","omarchy-local")' "$HOME/.omp/agent/models.yml"
 ok 'OMP and Pi wiring is minimal and reversible'
 
 assert jq -e '.id=="sero.local-ai" and .entryPoints.barWidget=="Panel.qml"' "$ROOT/manifest.json" >/dev/null

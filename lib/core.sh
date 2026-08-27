@@ -181,6 +181,28 @@ request_json() {
       '{model:$model,messages:[{role:"user",content:$prompt}],stream:false}')"
 }
 
+omp_yaml() {
+  local action=$1 model=${2:-} provider=${3:-} dir="$HOME/.omp/agent"
+  mkdir -p "$dir"
+  LOCAL_PROVIDER="$provider" ruby -ryaml -rjson -e '
+    path, action, model = ARGV
+    data = File.exist?(path) ? (YAML.safe_load(File.read(path)) || {}) : {}
+    raise "invalid #{path}" unless data.is_a?(Hash)
+    providers = data["providers"] ||= {}
+    action == "set" ? providers["omarchy-local"] = JSON.parse(ENV.fetch("LOCAL_PROVIDER")) : providers.delete("omarchy-local")
+    tmp = "#{path}.tmp.#{$$}"; File.write(tmp, JSON.pretty_generate(data) + "\n"); File.rename(tmp, path)
+  ' "$dir/models.yml" "$action" "$model"
+  ruby -ryaml -rjson -e '
+    path, action, model = ARGV
+    data = File.exist?(path) ? (YAML.safe_load(File.read(path)) || {}) : {}
+    raise "invalid #{path}" unless data.is_a?(Hash)
+    roles = data["modelRoles"] ||= {}; current = roles["default"]
+    if action == "set" && (current.nil? || current.start_with?("omarchy-local/")); roles["default"] = "omarchy-local/#{model}"
+    elsif action == "del" && current&.start_with?("omarchy-local/"); roles.delete("default"); data.delete("modelRoles") if roles.empty?; end
+    tmp = "#{path}.tmp.#{$$}"; File.write(tmp, JSON.pretty_generate(data) + "\n"); File.rename(tmp, path)
+  ' "$dir/config.yml" "$action" "$model"
+}
+
 wire_agents() {
   local recipe=$1 model provider dir current tmp
   model=$(jq -r '.model.servedName' <<<"$recipe")
@@ -194,6 +216,7 @@ wire_agents() {
     [[ -f $dir/settings.json ]] && current=$(<"$dir/settings.json") || current='{}'; jq -e 'type=="object"' <<<"$current" >/dev/null || fail "invalid $dir/settings.json"
     tmp=$(mktemp "$dir/.settings.XXXXXX"); jq --arg model "$model" 'if .defaultProvider==null or .defaultProvider=="local" then .defaultProvider="local"|.defaultModel=$model else . end' <<<"$current" >"$tmp"; mv "$tmp" "$dir/settings.json"
   done
+  omp_yaml set "$model" "$(jq 'del(.apiKey) + {auth:"none"}' <<<"$provider")"
 }
 
 record_usage() {
@@ -287,4 +310,5 @@ unwire_agents() {
     [[ -f $dir/models.json ]] && tmp=$(mktemp "$dir/.models.XXXXXX") && jq 'del(.providers.local)' "$dir/models.json" >"$tmp" && mv "$tmp" "$dir/models.json"
     [[ -f $dir/settings.json ]] && tmp=$(mktemp "$dir/.settings.XXXXXX") && jq 'if .defaultProvider=="local" then del(.defaultProvider,.defaultModel) else . end' "$dir/settings.json" >"$tmp" && mv "$tmp" "$dir/settings.json"
   done
+  omp_yaml del
 }
