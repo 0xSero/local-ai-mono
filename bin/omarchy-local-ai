@@ -272,15 +272,15 @@ launch_tui() {
   HYPRLAND_INSTANCE_SIGNATURE=$sig hyprctl dispatch "hl.dsp.exec_cmd($enc)" >/dev/null
 }
 open_agent() {
-  local name=${1:-pi} bin served
+  local name=${1:-pi} bin served sid; sid=${OMARCHY_AI_SESSION_ID:-$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen | tr A-Z a-z)}
   [[ $(sread | jq -r '.active.apiReady') == true ]] || fail "load a model first"
   served=$(sread | jq -r .active.servedModel)
   case $name in
     pi|omp) bin=$(bin_of "$name") || fail "$name is not installed" ;;
     *) fail "choose pi or omp" ;;
   esac
-  [[ $name == omp ]] && launch_tui "$bin" --auto-approve --provider omarchy-local --model "$served" \
-    || launch_tui "$bin" --provider omarchy-local --model "$served"
+  [[ $name == omp ]] && launch_tui "$bin" --auto-approve --provider omarchy-local --model "$served" --session-id "$sid" \
+    || launch_tui "$bin" --provider omarchy-local --model "$served" --session-id "$sid"
 }
 spawn() {
   if [[ ${OMARCHY_AI_FOREGROUND:-0} == 1 ]]; then "$SELF" "$@" >/dev/null 2>&1 || true; return; fi

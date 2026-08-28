@@ -116,7 +116,7 @@ ok 'run transitions to ready, confirms API identity, and wires the collision-saf
   hyprctl() { printf '%s\n' "$*" >"$TMP/hyprctl.out"; }; export -f hyprctl
   "$CLI" open-agent pi >/dev/null
 )
-assert grep -q -- '--provider omarchy-local --model org/small' "$TMP/hyprctl.out"
+assert grep -q -- '--provider omarchy-local --model org/small --session-id' "$TMP/hyprctl.out"
 ok 'open-agent launches pi with explicit --provider/--model args, not unrelated defaults'; "$CLI" scan >/dev/null
 assert jq -e '.state=="ready" and .active.recipeId=="small-3090"' >/dev/null <<<"$(snap)"
 ok 'scanning while an accepted model is active finishes ready, not idle'; assert [ "$(jq -r .owned "$CD/containers/omarchy-local-ai")" = 1 ]
