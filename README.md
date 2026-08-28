@@ -4,8 +4,12 @@ A small, theme-native Omarchy plugin for running registry models on local GPUs.
 
 ![Local AI hardware and recipe panel](media/dashboard.png)
 
-[Watch the 59-second lifecycle demo](media/demo.mp4): scan, download, run,
-inspect VRAM, open Pi with tool calling, switch, and unload.
+[Watch the 53-second verified lifecycle demo](media/demo.mp4): open the circle
+popup, inspect detected hardware and registry recipes, run a downloaded model,
+watch it pass API and tool-call acceptance, open that model in Pi, execute a
+real Bash tool, and unload it. Only the model startup wait is accelerated.
+
+![Pi using the selected local model to execute a Bash tool](media/pi.png)
 
 ## What it does
 
