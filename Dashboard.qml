@@ -117,7 +117,7 @@ Item {
             Row {
               width: parent.width * 0.34; spacing: Style.space(16); layoutDirection: Qt.RightToLeft
               Link { text: "Unload"; enabled: root.hasActive; onTriggered: root.act(["unload"]) }
-              Link { text: "Open Pi"; enabled: root.loaded; onTriggered: { root.act(["open-agent", "pi"]); root.dismiss() } }
+              Link { text: "Open Pi"; enabled: root.loaded; onTriggered: { Quickshell.execDetached([root.cli, "open-agent", "pi"]); root.dismiss() } }
               Link { text: "Scan"; enabled: !root.busy; onTriggered: root.act(["scan"]) }
             }
           }
