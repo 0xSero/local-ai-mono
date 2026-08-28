@@ -100,7 +100,7 @@ Item {
         anchors.fill: parent
         onMoveRequested: function(dx, dy) { if (dy) root.choose(root.selectedIndex + dy) }
         onActivateRequested: root.primary()
-        onCloseRequested: root.dismiss()
+        onCloseRequested: root.dismiss(); onTextKey: function(t) { if (t === "p" && root.loaded) { Quickshell.execDetached([root.cli, "open-agent", "pi"]); root.dismiss() } }
         Column {
           id: body
           anchors.fill: parent

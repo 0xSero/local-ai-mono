@@ -159,7 +159,7 @@ for q in Dashboard.qml Panel.qml; do
   ! grep -Eq '#[0-9A-Fa-f]{6}' "$ROOT/$q" || { printf 'not ok - %s embeds a fixed color\n' "$q" >&2; exit 1; }
 done
 assert grep -q '"Running"' "$ROOT/Dashboard.qml"
-assert grep -q 'PanelWindow {' "$ROOT/Dashboard.qml"; assert grep -q 'execDetached.*open-agent.*pi' "$ROOT/Dashboard.qml"
+assert grep -q 'PanelWindow {' "$ROOT/Dashboard.qml"; assert grep -q 'onTextKey.*execDetached.*open-agent.*pi' "$ROOT/Dashboard.qml"
 assert grep -q 'BarIconButton {' "$ROOT/Panel.qml"
 ok 'QML derives loaded/recovery UI from active.apiReady, not state, with no fixed-palette markers'
 hw_ok=0
