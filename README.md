@@ -1,3 +1,5 @@
+> **Archived 2026-09-03.** Superseded by [local-ai-registry](https://github.com/0xSero/local-ai-registry) (docs: https://0xsero.github.io/local-ai-registry/). Kept read-only for history.
+
 # Omarchy Local AI
 
 A small, theme-native Omarchy plugin for running registry models on local GPUs.
